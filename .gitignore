@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller 构建产物
+build/
+dist/
+release/
+*.spec.bak
+
+# 打包文件
+*.exe
+*.pkg
+*.msi
+*.dmg
+*.app/
+
+# IDE / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 环境/密钥
+.env
+*.log

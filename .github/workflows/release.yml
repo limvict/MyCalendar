@@ -1,0 +1,114 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Extract version from tag
+        id: ver
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag must be vX.Y.Z (got: $GITHUB_REF_NAME)"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Patch updater.py (version + manifest url)
+        shell: python
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          import os, pathlib, re
+          p = pathlib.Path("updater.py")
+          s = p.read_text(encoding="utf-8")
+          s = re.sub(r'CURRENT_VERSION\s*=\s*"[^"]*"',
+                     f'CURRENT_VERSION = "{os.environ["VER"]}"', s)
+          url = (f'https://github.com/{os.environ["REPO"]}'
+                 f'/releases/latest/download/version.json')
+          s = re.sub(r'UPDATE_MANIFEST_URL\s*=\s*"[^"]*"',
+                     f'UPDATE_MANIFEST_URL = "{url}"', s)
+          p.write_text(s, encoding="utf-8")
+
+      - name: Build exe (PyInstaller onefile)
+        run: pyinstaller app.spec --noconfirm --clean
+
+      - name: Verify single-file exe
+        shell: bash
+        run: |
+          if [ ! -f dist/DesktopCalendar.exe ]; then
+            echo "::error::Expected single-file exe at dist/DesktopCalendar.exe"
+            ls -la dist/ || true
+            grep -n "COLLECT" app.spec || echo "(no COLLECT)"
+            exit 1
+          fi
+          SIZE=$(stat -c%s dist/DesktopCalendar.exe)
+          echo "OK: dist/DesktopCalendar.exe = $SIZE bytes"
+          [ "$SIZE" -ge 1000000 ] || { echo "::error::exe too small"; exit 1; }
+
+      - name: Compute SHA-256
+        id: sha
+        shell: bash
+        run: |
+          HASH=$(sha256sum dist/DesktopCalendar.exe | awk '{print $1}')
+          echo "sha256=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Build installer (Inno Setup)
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+              /DMyAppVersion=${{ steps.ver.outputs.version }} installer.iss
+          $setup = Get-ChildItem dist/DesktopCalendar-Setup-*.exe -ErrorAction SilentlyContinue
+          if (-not $setup) {
+            Write-Error "Inno Setup did not produce dist/DesktopCalendar-Setup-*.exe"
+            Get-ChildItem dist/ | Format-Table
+            exit 1
+          }
+          Write-Host "OK: $($setup.Name) ($($setup.Length) bytes)"
+
+      - name: Write version.json
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          SHA: ${{ steps.sha.outputs.sha256 }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > dist/version.json <<EOF
+          {
+            "version": "$VER",
+            "download_url": "https://github.com/$REPO/releases/download/${GITHUB_REF_NAME}/DesktopCalendar.exe",
+            "sha256": "$SHA",
+            "release_notes": "See release page."
+          }
+          EOF
+          cat dist/version.json
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/DesktopCalendar.exe
+            dist/version.json
+            dist/DesktopCalendar-Setup-*.exe
+          generate_release_notes: true

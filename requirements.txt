@@ -1,0 +1,4 @@
+﻿PyQt6>=6.6,<7
+cnlunar>=0.2
+chinese_calendar>=1.10
+pyinstaller>=6.0
