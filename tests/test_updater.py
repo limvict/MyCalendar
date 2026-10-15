@@ -27,7 +27,6 @@ from updater import (
     _sha256_of_file,
     _tmp_bat_name,
     _tmp_exe_name,
-    _WAIT_EXIT_MAX_SEC,
 )
 from event_bus import EventType
 
@@ -126,41 +125,38 @@ def test_tmp_names_include_pid_and_differ_per_pid():
     assert _tmp_bat_name(1) != _tmp_bat_name(2)
 
 
-# ===================== UpdateDownloader._build_bat =====================
+# ===================== UpdateDownloader._build_bat_script =====================
 
 def test_build_bat_polls_pid_then_moves(qapp):
     """bat 必须先等主程序退出再 move，且 move 顺序为
-    old ← exe、exe ← new，最后 start 新 exe。"""
-    dl = UpdateDownloader("http://x/y.exe", "abc", target_pid=12345)
-    bat = dl._build_bat(
-        exe_path=r"C:\app\main.exe",
-        new_exe=r"C:\Temp\new.exe",
-        old_exe=r"C:\app\main.exe.old",
-        bat_path=r"C:\Temp\a.bat",
-    )
+    old ← exe、exe ← new，最后 start 新 exe。
 
-    # 轮询段的 PID 与上限
-    assert "TARGET_PID=12345" in bat
+    路径 / PID 走环境变量（DLC_PID / DLC_EXE / DLC_NEW / DLC_OLD /
+    DLC_WAIT），脚本里是 %DLC_*% 占位符，避免在 Python 侧做 cmd
+    转义；具体值由 run() 在 Popen(env=...) 时注入。
+    """
+    bat = UpdateDownloader._build_bat_script()
+
+    # 轮询段：从环境变量取 PID，tasklist 查询，计数上限从 WAIT_MAX 取
+    assert 'TARGET_PID=%DLC_PID%' in bat
     assert "tasklist /FI" in bat
-    assert f"GEQ {_WAIT_EXIT_MAX_SEC}" in bat
+    assert "GEQ %WAIT_MAX%" in bat
 
     # move 顺序：先备份旧 exe，再把新 exe 顶上，最后启动
-    i_backup = bat.index(r'move /y "C:\app\main.exe" "C:\app\main.exe.old"')
-    i_move   = bat.index(r'move /y "C:\Temp\new.exe" "C:\app\main.exe"')
-    i_start  = bat.index(r'start "" "C:\app\main.exe"')
+    i_backup = bat.index(r'move /y "%EXE%" "%OLD%"')
+    i_move   = bat.index(r'move /y "%NEW%" "%EXE%"')
+    i_start  = bat.index(r'start "" "%EXE%"')
     assert i_backup < i_move < i_start
 
 
 def test_build_bat_self_deletes(qapp):
-    dl = UpdateDownloader("http://x/y.exe", "abc", target_pid=1)
-    bat = dl._build_bat("a.exe", "b.exe", "a.exe.old", "c.bat")
-    assert "del \"%~f0\"" in bat
+    bat = UpdateDownloader._build_bat_script()
+    assert 'del "%~f0"' in bat
 
 
 def test_build_bat_uses_crlf(qapp):
     """Windows cmd 对 LF-only 容忍度差，脚本必须写 CRLF。"""
-    dl = UpdateDownloader("http://x/y.exe", "abc", target_pid=1)
-    bat = dl._build_bat("a.exe", "b.exe", "a.exe.old", "c.bat")
+    bat = UpdateDownloader._build_bat_script()
     assert "\r\n" in bat
     # 不应出现孤立的 \n（每个 \n 前面都跟着 \r）
     for i, ch in enumerate(bat):

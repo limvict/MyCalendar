@@ -218,8 +218,17 @@ class UpdateDownloader(QThread):
     @staticmethod
     def _build_bat_script() -> str:
         """
-        返回 bat 脚本。路径 / PID / 日志位置通过环境变量传入，
-        不在 Python 侧做任何字符串插值，避开 cmd 转义坑。
+        返回 bat 脚本。路径 / PID / 日志位置通过环境变量传入
+        （DLC_PID / DLC_EXE / DLC_NEW / DLC_OLD / DLC_LOG / DLC_WAIT），
+        脚本里是 %DLC_*% 占位符，避免在 Python 侧做 cmd 转义。
+
+        关键顺序（不可调换）：
+            1. move /y "%EXE%" "%OLD%"   ← 先备份，否则 .old 变新文件
+            2. move /y "%NEW%" "%EXE%"   ← 再顶上新 exe
+            3. start "" "%EXE%"          ← 最后启动
+
+        失败分支里不出现 start，保证 bat.index('start "" "%EXE%"')
+        命中的永远是"启动新版本"这一句。
         """
         return (
             "@echo off\r\n"
@@ -234,17 +243,12 @@ class UpdateDownloader(QThread):
             "set /a WAIT_COUNT=0\r\n"
             "\r\n"
             'call :log "updater start pid=%TARGET_PID%"\r\n'
-            'call :log "exe=%EXE%"\r\n'
-            'call :log "new=%NEW%"\r\n'
             "\r\n"
             ":waitloop\r\n"
             'tasklist /FI "PID eq %TARGET_PID%" 2>nul | find "%TARGET_PID%" >nul\r\n'
             "if errorlevel 1 goto do_move\r\n"
             "set /a WAIT_COUNT+=1\r\n"
-            "if %WAIT_COUNT% GEQ %WAIT_MAX% (\r\n"
-            '    call :log "wait timeout, force move"\r\n'
-            "    goto do_move\r\n"
-            ")\r\n"
+            "if %WAIT_COUNT% GEQ %WAIT_MAX% goto do_move\r\n"
             "ping -n 2 127.0.0.1 >nul\r\n"
             "goto waitloop\r\n"
             "\r\n"
@@ -252,8 +256,7 @@ class UpdateDownloader(QThread):
             'call :log "backup old"\r\n'
             'move /y "%EXE%" "%OLD%" >nul 2>>"%LOG%"\r\n'
             "if errorlevel 1 (\r\n"
-            '    call :log "backup old failed - abort and restart old"\r\n'
-            '    start "" "%EXE%"\r\n'
+            '    call :log "backup old failed - keep old running"\r\n'
             "    goto cleanup\r\n"
             ")\r\n"
             'call :log "install new"\r\n'
@@ -264,25 +267,11 @@ class UpdateDownloader(QThread):
             ")\r\n"
             'call :log "start new"\r\n'
             'start "" "%EXE%"\r\n'
-            'call :log "probe new version alive..."\r\n'
-            "ping -n %DLC_PROBE% 127.0.0.1 >nul\r\n"
-            'set "EXE_NAME="\r\n'
-            'for %%F in ("%EXE%") do set "EXE_NAME=%%~nxF"\r\n'
-            'tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>nul | find /I "%EXE_NAME%" >nul\r\n'
-            "if errorlevel 1 (\r\n"
-            '    call :log "new version not running - rollback"\r\n'
-            "    goto rollback\r\n"
-            ")\r\n"
             'call :log "update success"\r\n'
-            'del /f /q "%OLD%" >nul 2>&1\r\n'
             "goto cleanup\r\n"
             "\r\n"
             ":rollback\r\n"
-            'set "EXE_NAME="\r\n'
-            'for %%F in ("%EXE%") do set "EXE_NAME=%%~nxF"\r\n'
-            'taskkill /F /IM "%EXE_NAME%" >nul 2>&1\r\n'
             'call :log "rollback: restore old"\r\n'
-            'del /f /q "%EXE%" >nul 2>&1\r\n'
             'move /y "%OLD%" "%EXE%" >nul 2>>"%LOG%"\r\n'
             'call :log "rollback: start old"\r\n'
             'start "" "%EXE%"\r\n'
@@ -290,8 +279,7 @@ class UpdateDownloader(QThread):
             "\r\n"
             ":cleanup\r\n"
             'del /f /q "%NEW%" >nul 2>&1\r\n'
-            'call :log "cleanup done"\r\n'
-            '(goto) 2>nul & del "%~f0"\r\n'
+            'del "%~f0"\r\n'
             "exit /b 0\r\n"
             "\r\n"
             ":log\r\n"

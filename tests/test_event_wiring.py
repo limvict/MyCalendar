@@ -27,7 +27,7 @@ class FakeWindow:
         self._on_update_available = MagicMock(name="_on_update_available")
         self._on_update_failed    = MagicMock(name="_on_update_failed")
         self._on_update_ready     = MagicMock(name="_on_update_ready")
-
+        self._on_update_progress   = MagicMock(name="_on_update_progress")
 
 # 说明：不能 monkeypatch event_bus.subscribe —— 它是个只读代理
 # (_EventBusProxy)，方法属性不可写。要换就换整个名字。
@@ -44,7 +44,7 @@ class FakeBus:
 
 def test_subscriptions_has_all_eleven():
     subs = event_wiring._subscriptions(FakeWindow())
-    assert len(subs) == 11
+    assert len(subs) == 12
 
 
 def test_subscriptions_bind_correct_callbacks():
@@ -62,7 +62,7 @@ def test_subscriptions_bind_correct_callbacks():
     assert subs[EventType.UPDATE_AVAILABLE]      is w._on_update_available
     assert subs[EventType.UPDATE_FAILED]         is w._on_update_failed
     assert subs[EventType.UPDATE_READY]          is w._on_update_ready
-
+    assert subs[EventType.UPDATE_PROGRESS]       is w._on_update_progress
 
 def test_connect_disconnect_are_symmetric(monkeypatch):
     """connect / disconnect 必须遍历同一份声明表。"""
@@ -75,7 +75,7 @@ def test_connect_disconnect_are_symmetric(monkeypatch):
 
     subs   = [(e, c) for tag, e, c in calls if tag == "sub"]
     unsubs = [(e, c) for tag, e, c in calls if tag == "unsub"]
-    assert len(subs) == len(unsubs) == 11
+    assert len(subs) == len(unsubs) == 12
     for (e1, c1), (e2, c2) in zip(subs, unsubs):
         assert e1 == e2, f"事件类型不一致: {e1!r} vs {e2!r}"
         assert c1 is c2, f"回调不是同一对象: {c1!r} vs {c2!r}"
@@ -92,7 +92,7 @@ def test_connect_continues_after_individual_failure(monkeypatch):
 
     monkeypatch.setattr(event_wiring, "event_bus", BadBus(calls))
     event_wiring.connect(FakeWindow())
-    assert len(calls) == 11  # 若实现是整体 try，只会有 1 条
+    assert len(calls) == 12  # 若实现是整体 try，只会有 1 条
 
 
 def test_disconnect_swallows_individual_failures(monkeypatch):
@@ -109,11 +109,12 @@ def test_disconnect_swallows_individual_failures(monkeypatch):
     w = FakeWindow()
     event_wiring.disconnect(w)
 
-    assert len(calls) == 11   # 数量对账
-    # 身份对账：11 条恰好是 w 上的 11 个回调，不重不漏。
+    assert len(calls) == 12   # 数量对账
+    # 身份对账：12 条恰好是 w 上的 12 个回调，不重不漏。
     assert {cb for _, cb in calls} == {
         w._on_holiday_updated, w._on_memorial_changed,
         w._on_window_show, w._on_window_quit, w._on_toggle_topmost,
         w._on_open_settings, w._on_backup_memorial, w._on_restore_memorial,
         w._on_update_available, w._on_update_failed, w._on_update_ready,
+        w._on_update_progress,
     }
