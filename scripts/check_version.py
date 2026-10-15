@@ -17,19 +17,25 @@ import re
 import sys
 from pathlib import Path
 
+# Windows 控制台默认 cp1252/cp437，中文 print 会 UnicodeEncodeError。
+# 强制 stdout/stderr 走 UTF-8，errors=replace 兜底。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _read(path: Path) -> str:
     if not path.exists():
-        raise SystemExit(f"文件不存在: {path}")
+        raise SystemExit(f"file not found: {path}")
     return path.read_text(encoding="utf-8")
 
 
 def _grab(path: Path, pattern: str, label: str) -> str:
     m = re.search(pattern, _read(path))
     if not m:
-        raise SystemExit(f"未在 {path.name} 中匹配到 {label}")
+        raise SystemExit(f"pattern not found in {path.name}: {label}")
     return m.group(1)
 
 
@@ -39,19 +45,17 @@ def _iss_exe_names() -> tuple[str, list[str]]:
 
     m1 = re.search(r'#define\s+MyAppExeName\s+"([^"]+)"', text)
     if not m1:
-        raise SystemExit("未在 installer.iss 中找到 #define MyAppExeName")
+        raise SystemExit("MyAppExeName not found in build/installer.iss")
 
-    # 放宽：只要 Source: "...\xxx.exe" 就抓，不限 ..\dist\ 前缀
     exes = re.findall(r'Source:\s*"[^"]*[\\/]([^"\\/]+\.exe)"', text)
     if not exes:
         raise SystemExit(
-            "未在 installer.iss 的 [Files] 中找到任何 .exe 的 Source 行")
+            "no .exe Source line found in build/installer.iss [Files]")
 
     return m1.group(1), exes
 
 
 def _build_exe_name() -> str:
-    """从 build/build.py 提取 EXE = DIST / "xxx.exe" 的文件名。"""
     return _grab(
         ROOT / "build" / "build.py",
         r'EXE\s*=\s*DIST\s*/\s*"([^"]+)"',
@@ -72,24 +76,22 @@ def main() -> int:
         "MyAppVersion",
     )
     if py_ver != iss_ver:
-        print(f"ERROR: 版本不一致 updater.py={py_ver} installer.iss={iss_ver}")
+        print(f"ERROR: version mismatch: updater.py={py_ver} installer.iss={iss_ver}")
         return 1
 
     # 2. installer.iss 内部 exe 名一致
     app_exe, iss_exes = _iss_exe_names()
     if app_exe not in iss_exes:
-        print(f"ERROR: MyAppExeName={app_exe} 未出现在 [Files] Source 的 "
-              f"exe 列表中: {iss_exes}")
+        print(f"ERROR: MyAppExeName={app_exe} not in [Files] Source exes: {iss_exes}")
         return 1
 
     # 3. build.py 的 exe 名一致
     build_exe = _build_exe_name()
     if app_exe != build_exe:
-        print(f"ERROR: exe 名不一致 "
-              f"MyAppExeName={app_exe} build.py={build_exe}")
+        print(f"ERROR: exe name mismatch: MyAppExeName={app_exe} build.py={build_exe}")
         return 1
 
-    print(f"OK: 版本一致 {py_ver}，exe 名一致 {app_exe}")
+    print(f"OK: version={py_ver}, exe={app_exe}")
     return 0
 
 

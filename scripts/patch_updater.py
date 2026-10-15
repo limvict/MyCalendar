@@ -1,35 +1,42 @@
 # coding: utf-8
 """
-CI 专用：把 tag 版本号写进
-  - updater.py 的 CURRENT_VERSION
-  - build/installer.iss 的 #define MyAppVersion
+CI helper: patch tag version into
+  - updater.py  CURRENT_VERSION
+  - build/installer.iss  #define MyAppVersion
 
-不改 UPDATE_MANIFEST_URL —— 该值已固定指向
-releases/latest/download/version.json，与具体版本无关。
+Does NOT touch UPDATE_MANIFEST_URL -- it is fixed to
+releases/latest/download/version.json, independent of version.
 
-用法：
+Usage:
     VER=3.0.2 python scripts/patch_updater.py
 """
+from __future__ import annotations
+
 import os
 import pathlib
 import re
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VER = os.environ.get("VER", "").strip()
 
 if not VER:
-    raise SystemExit("环境变量 VER 未设置，例如 VER=3.0.2 python scripts/patch_updater.py")
+    raise SystemExit("env VER not set, e.g. VER=3.0.2 python scripts/patch_updater.py")
 if not re.fullmatch(r"\d+\.\d+\.\d+", VER):
-    raise SystemExit(f"VER 格式错误（应为 X.Y.Z）：{VER}")
+    raise SystemExit(f"VER format invalid (expect X.Y.Z): {VER}")
 
 
 def patch(path: pathlib.Path, pattern: str, repl: str, label: str) -> None:
     if not path.exists():
-        raise SystemExit(f"文件不存在: {path}")
+        raise SystemExit(f"file not found: {path}")
     s = path.read_text(encoding="utf-8")
     s2, n = re.subn(pattern, repl, s, count=1)
     if n == 0:
-        raise SystemExit(f"未在 {path.name} 中匹配到 {label}")
+        raise SystemExit(f"pattern not found in {path.name}: {label}")
     if s2 != s:
         path.write_text(s2, encoding="utf-8")
         print(f"Patched {label} in {path.name} -> {VER}")
