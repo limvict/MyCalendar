@@ -41,7 +41,7 @@ logger = get_logger()
 
 # ===================== 更新配置 =====================
 # 部署时改成你自己的版本清单地址
-UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/yourname/yourrepo/main/version.json"
+UPDATE_MANIFEST_URL = "https://github.com/limvict/MyCalendar/releases/latest/download/version.json"
 
 # 当前程序版本，与打包时 installer.iss 的 AppVersion 保持一致
 # CI 建议加脚本校验（见 scripts/check_version.py）

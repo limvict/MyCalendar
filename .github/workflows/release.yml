@@ -10,6 +10,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
 
@@ -35,25 +37,17 @@ jobs:
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Patch updater.py (version + manifest url)
-        shell: python
+      - name: Patch version into updater.py & installer.iss
+        shell: bash
         env:
           VER: ${{ steps.ver.outputs.version }}
-          REPO: ${{ github.repository }}
-        run: |
-          import os, pathlib, re
-          p = pathlib.Path("updater.py")
-          s = p.read_text(encoding="utf-8")
-          s = re.sub(r'CURRENT_VERSION\s*=\s*"[^"]*"',
-                     f'CURRENT_VERSION = "{os.environ["VER"]}"', s)
-          url = (f'https://github.com/{os.environ["REPO"]}'
-                 f'/releases/latest/download/version.json')
-          s = re.sub(r'UPDATE_MANIFEST_URL\s*=\s*"[^"]*"',
-                     f'UPDATE_MANIFEST_URL = "{url}"', s)
-          p.write_text(s, encoding="utf-8")
+        run: python scripts/patch_updater.py
+
+      - name: Verify version consistency
+        run: python scripts/check_version.py
 
       - name: Build exe (PyInstaller onefile)
-        run: pyinstaller app.spec --noconfirm --clean
+        run: pyinstaller build/app.spec --noconfirm --clean
 
       - name: Verify single-file exe
         shell: bash
@@ -61,7 +55,6 @@ jobs:
           if [ ! -f dist/DesktopCalendar.exe ]; then
             echo "::error::Expected single-file exe at dist/DesktopCalendar.exe"
             ls -la dist/ || true
-            grep -n "COLLECT" app.spec || echo "(no COLLECT)"
             exit 1
           fi
           SIZE=$(stat -c%s dist/DesktopCalendar.exe)
@@ -79,10 +72,10 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-              /DMyAppVersion=${{ steps.ver.outputs.version }} installer.iss
-          $setup = Get-ChildItem dist/DesktopCalendar-Setup-*.exe -ErrorAction SilentlyContinue
+              /DMyAppVersion=${{ steps.ver.outputs.version }} build\installer.iss
+          $setup = Get-ChildItem dist/DesktopCalendar_Setup_*.exe -ErrorAction SilentlyContinue
           if (-not $setup) {
-            Write-Error "Inno Setup did not produce dist/DesktopCalendar-Setup-*.exe"
+            Write-Error "Inno Setup did not produce dist/DesktopCalendar_Setup_*.exe"
             Get-ChildItem dist/ | Format-Table
             exit 1
           }
@@ -110,5 +103,5 @@ jobs:
           files: |
             dist/DesktopCalendar.exe
             dist/version.json
-            dist/DesktopCalendar-Setup-*.exe
+            dist/DesktopCalendar_Setup_*.exe
           generate_release_notes: true

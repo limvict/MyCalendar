@@ -1,4 +1,4 @@
-# Python
+# ---------- Python ----------
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -6,25 +6,29 @@ __pycache__/
 venv/
 env/
 
-# PyInstaller ��������
-build/
+# ---------- PyInstaller 中间产物 ----------
+# 注意：不要忽略 build/ 本身！
+# build/app.spec / build/build.py / build/installer.iss 是源码，必须提交。
+build/app/
 dist/
 release/
 *.spec.bak
 
-# ����ļ�
+# ---------- 构建产物（exe/安装包） ----------
 *.exe
-*.pkg
 *.msi
 *.dmg
-*.app/
+*.pkg
 
-# IDE / ϵͳ
+# ---------- IDE / 系统 ----------
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
-# ����/��Կ
+# ---------- 敏感 / 日志 ----------
 .env
 *.log
+
+# pytest 临时产物
+.pytest_tmp/
