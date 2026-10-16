@@ -206,7 +206,6 @@ class ReminderManager(QObject):
     def _calc_next_timestamp(self):
         """计算所有纪念日最近的未来提醒时间戳(ms)，没有返回 None。"""
         candidates = []
-        # now_dt / today_q 用同一时刻，避免跨秒/跨日微差
         now_dt = datetime.now()
         today_q = QDate(now_dt.year, now_dt.month, now_dt.day)
         remind_h = self._get_int_cfg(
@@ -241,11 +240,20 @@ class ReminderManager(QObject):
                         f"提醒时刻 "
                         f"{datetime.fromtimestamp(ts / 1000).strftime('%Y-%m-%d %H:%M')}")
                     break
+
+                # 本周期提醒窗口已过，推进 search_base 到 target 次日，
+                # 让 get_next_memorial_date 取到下一周期的 target。
+                #
+                # 不能用 target.addYears(1) / addMonths(1) / addDays(7)：
+                # _next_solar_yearly / _next_solar_monthly / _next_week_date
+                # 全部是"严格大于 base_date"语义，跳过整周期会直接落到
+                # 下下个周期，造成漏提醒。+1 天是唯一正确的推进量。
                 search_base = target.addDays(1)
 
         if not candidates:
             return None
         return min(candidates)
+   
 
     # ------------------------------------------------------------------ #
     # 定时触发

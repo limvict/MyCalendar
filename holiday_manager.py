@@ -26,7 +26,8 @@ class HolidayManager(QObject):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(self.REFRESH_INTERVAL_MS)
         self._refresh_timer.timeout.connect(self.fetch_current_year)
-        self._refresh_timer.start()
+        if self._net_worker is not None:
+            self._refresh_timer.start()
 
     def _init_network(self):
         thread = None

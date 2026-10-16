@@ -244,7 +244,7 @@ class LunarCalendarWidget(QCalendarWidget):
                 qdate, lunar=lunar, legal_raw=legal_raw, date_str=date_str),
             }
         except Exception:
-            date_str = qdate.toString('yyyy-MM-dd')
+            date_str = f"{qdate.year()}-{qdate.month()}-{qdate.day()}"
             self._log_exception_once(
                 f"_calc_cell_data:{date_str}",
                 f"预计算单元格数据失败 date={date_str}")
