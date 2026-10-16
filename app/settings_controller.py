@@ -9,6 +9,7 @@
 【顺序约束】apply_settings 里 config 落盘 → window_state 生效 →
 事件广播 → 语言切换 → 自启处理的顺序是有意为之，不要"整理"。
 """
+import copy
 from PyQt6.QtWidgets import QDialog
 
 from config import config, get_logger
@@ -49,7 +50,7 @@ def open_settings_dialog(window) -> None:
 
 
 def apply_settings(window, dlg: SettingDialog) -> None:
-    new_cfg = dlg.cfg
+    new_cfg = copy.deepcopy(dlg.cfg)
     new_lang = dlg.get_language()
     lang_changed = new_lang != config.get("language", "zh_CN")
     new_cfg["language"] = new_lang

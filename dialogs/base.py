@@ -106,14 +106,16 @@ class RetranslatableDialog:
         super().__init__(*args, **kwargs)
         cb = self.retranslate_ui
         self._retranslate_cb = cb
-        on_language_changed(cb)
         try:
-            self.destroyed.connect(self._detach_language_listener)
+             self.destroyed.connect(self._detach_language_listener)
         except Exception:
-            # 理论上 QObject 一定有 destroyed；防御性 try 避免因信号连接
-            # 失败导致对话框整体构造失败。此时监听仍已挂载，done() 会
-            # 在正常关闭路径兜底卸载。
-            logger.exception("连接 destroyed 信号失败，仅依赖 done() 卸载")
+             # 理论上 QObject 一定有 destroyed；防御性 try 避免因信号连接
+             # 失败导致对话框整体构造失败。此时监听仍已挂载，done() 会
+             # 在正常关闭路径兜底卸载。
+             logger.exception("连接 destroyed 信号失败，仅依赖 done() 卸载")
+        # connect 之后再挂载：若 connect 失败，本行仍会执行，至少
+        # done() 路径能保证卸载；反过来则会出现"已挂载但无兜底"的窗口。
+        on_language_changed(cb)
 
     def _detach_language_listener(self, _obj=None):
         """注销语言监听。幂等：重复调用 / 已销毁时是 no-op。"""

@@ -2,15 +2,21 @@
 """updater 单元测试。
 
 不启动真实线程、不触网、不写注册表：
-  - 纯函数：版本解析 / 比较、占位符 URL 检测、SHA-256 分块哈希、
-    临时文件名、bat 替换脚本生成；
+  - 纯函数：版本解析 / 比较、占位符 URL 检测、安全 URL 检测、
+    SHA-256 分块哈希、临时文件名、bat 替换脚本生成；
   - UpdateManager 状态机：check_async / _on_checked /
     download_and_apply_async / _on_downloaded 的早退与成功分支。
 
 UpdateChecker.run / UpdateDownloader.run 涉及真实网络与子进程，
 归入 integration 测试，不在本文件内。
+
+【平台前提】
+UpdateManager.download_and_apply_async 有 sys.platform == "win32"
+的显式门。本文件必须能在任意 CI 平台跑，故 packaged fixture 会同时
+伪装 _is_packaged 与 sys.platform。详见该 fixture 的 docstring。
 """
 import hashlib
+import re
 import sys
 from unittest.mock import MagicMock
 
@@ -23,6 +29,7 @@ from updater import (
     _is_newer,
     _is_packaged,
     _is_placeholder_url,
+    _is_safe_download_url,
     _parse_version,
     _sha256_of_file,
     _tmp_bat_name,
@@ -80,16 +87,57 @@ def test_is_placeholder_url(url, expected):
     assert _is_placeholder_url(url) is expected
 
 
+# ===================== 纯函数：_is_safe_download_url =====================
+
+@pytest.mark.parametrize("url,expected", [
+    # 合法
+    ("https://example.com/app.exe",          True),
+    ("http://example.com/app.exe",           True),
+    ("https://cdn.example.com:8443/x",       True),
+    # 非法：空 / 非 str
+    ("",                                     False),
+    (None,                                   False),
+    # 非法：无 scheme
+    ("x",                                    False),
+    ("//example.com/app.exe",                False),   # 协议相对
+    ("example.com/app.exe",                  False),
+    # 非法：危险 scheme
+    ("file:///tmp/evil.exe",                 False),
+    ("ftp://example.com/app.exe",            False),
+    ("javascript:alert(1)",                  False),
+    ("data:application/x-msdownload;base64,AAAA", False),
+    # 非法：scheme 合法但无 host
+    ("https://",                             False),
+    ("http:///path",                         False),
+])
+def test_is_safe_download_url(url, expected):
+    """download_url 必须是 http(s) 且带 host。
+
+    这条检查挡住的是「version.json 被劫持后指向本地文件」的场景，
+    不是「URL 是否可达」——可达性由下载阶段验证。
+    """
+    assert _is_safe_download_url(url) is expected
+
+
 # ===================== 纯函数：_is_packaged =====================
 
 def test_is_packaged_false_in_source(monkeypatch):
     """源码环境 sys.frozen 不存在 → False，拒绝自动替换。"""
     monkeypatch.delattr(sys, "frozen", raising=False)
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    monkeypatch.delattr(sys, "nuitka_version", raising=False)
     assert _is_packaged() is False
 
 
 def test_is_packaged_true_when_frozen(monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert _is_packaged() is True
+
+
+def test_is_packaged_true_when_meipass(monkeypatch):
+    """部分打包器只设 _MEIPASS。"""
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", "/tmp/fake", raising=False)
     assert _is_packaged() is True
 
 
@@ -143,15 +191,40 @@ def test_build_bat_polls_pid_then_moves(qapp):
     assert "GEQ %WAIT_MAX%" in bat
 
     # move 顺序：先备份旧 exe，再把新 exe 顶上，最后启动
-    i_backup = bat.index(r'move /y "%EXE%" "%OLD%"')
-    i_move   = bat.index(r'move /y "%NEW%" "%EXE%"')
-    i_start  = bat.index(r'start "" "%EXE%"')
+    i_backup = bat.index('move /y "%EXE%" "%OLD%"')
+    i_move   = bat.index('move /y "%NEW%" "%EXE%"')
+    i_start  = bat.index('start "" "%EXE%"')
     assert i_backup < i_move < i_start
+
+
+def test_build_bat_env_keys_consistent():
+    """Python 侧写入的每个 env key 都必须在 bat 里被消费。
+
+    与 run() 里 env.update({...}) 的键集保持同步：新增键时如果忘了
+    在 bat 里用，此测试会失败。DLC_PROBE 是已废弃的死变量。
+    """
+    bat = UpdateDownloader._build_bat_script()
+    for key in ("DLC_PID", "DLC_EXE", "DLC_NEW", "DLC_OLD",
+                "DLC_LOG", "DLC_WAIT"):
+        assert f"%{key}%" in bat, f"{key} 在 bat 脚本中未被使用"
+    assert "%DLC_PROBE%" not in bat, "DLC_PROBE 已废弃，不应再出现"
 
 
 def test_build_bat_self_deletes(qapp):
     bat = UpdateDownloader._build_bat_script()
     assert 'del "%~f0"' in bat
+
+
+def test_build_bat_self_delete_silences_errors(qapp):
+    """del 自身失败时不应向无归宿的 stderr 输出。
+
+    DETACHED 进程没有控制台，未重定向的错误会留下悬挂的
+    「cmd 无法找到文件」轨迹，或触发系统弹框。
+    """
+    bat = UpdateDownloader._build_bat_script()
+    assert 'del "%~f0" >nul 2>&1' in bat
+    # 旧写法（无重定向）不应残留
+    assert not re.search(r'del "%~f0"\r\n', bat)
 
 
 def test_build_bat_uses_crlf(qapp):
@@ -164,13 +237,70 @@ def test_build_bat_uses_crlf(qapp):
             assert bat[i - 1] == "\r", f"位置 {i} 处的 \\n 前没有 \\r"
 
 
+def _rollback_block(bat: str) -> str:
+    """切出 :rollback ... :cleanup 之间的文本。"""
+    start = bat.index(":rollback")
+    end = bat.index(":cleanup", start)
+    return bat[start:end]
+
+
+def test_build_bat_rollback_checks_move_errorlevel(qapp):
+    """回滚 move 失败时不能 start 一个不存在/损坏的 exe。
+
+    这是 bat 里的关键错误路径：安装失败 → 尝试用旧版本覆盖回去 →
+    如果这次 move 也失败，唯一能做的就是把错误记进日志后退出，
+    而不是 start 一个未验证的路径。
+    """
+    bat = UpdateDownloader._build_bat_script()
+    block = _rollback_block(bat)
+    assert re.search(
+    r'move /y "%OLD%" "%EXE%".*?\r\n\s*if errorlevel 1 \(',
+    block,
+    flags=re.DOTALL,
+), "rollback 的 move 后缺少 errorlevel 检查"
+
+
+def test_build_bat_rollback_failure_body_has_cleanup(qapp):
+    """errorlevel 命中时，分支体内必须 goto cleanup，而不是 start。"""
+    bat = UpdateDownloader._build_bat_script()
+    block = _rollback_block(bat)
+    m = re.search(r"if errorlevel 1 \(\s*(.*?)\s*\)", block, flags=re.DOTALL)
+    assert m, "rollback 的 errorlevel 分支体为空"
+    assert "goto cleanup" in m.group(1)
+
+
+def test_build_bat_start_appears_exactly_twice(qapp):
+    """start 只应出现在「安装成功」与「回滚成功」两条互斥路径上。
+
+    如果引入第三条路径，必须先更新本测试说明新场景，防止无意间
+    多出一个 start（那意味着某条错误路径上也可能启动程序）。
+    """
+    bat = UpdateDownloader._build_bat_script()
+    assert bat.count('start "" "%EXE%"') == 2
+
+
+def test_build_bat_no_start_inside_errorlevel_body(qapp):
+    """任何 errorlevel 分支体内都不能 start——那是未验证的路径。"""
+    bat = UpdateDownloader._build_bat_script()
+    for m in re.finditer(
+        r"if errorlevel 1 \(\s*(.*?)\s*\)", bat, flags=re.DOTALL
+    ):
+        assert "start " not in m.group(1), \
+            f"errorlevel 分支体内出现 start: {m.group(1)!r}"
+
+
 # ===================== UpdateManager 测试替身 =====================
 
 _REAL_URL = "https://real.example.com/version.json"
 
 
 class _FakeBus:
-    """只记录 publish；subscribe / unsubscribe 留给别处的替身。"""
+    """只记录 publish；subscribe / unsubscribe 是 no-op。
+
+    UpdateManager 目前只 publish，不 subscribe，故后两者是空实现。
+    若将来 UpdateManager 增加了订阅行为，应改用 MagicMock 让未预期
+    的调用浮出水面，而不是静默吞掉。
+    """
 
     def __init__(self):
         self.calls = []
@@ -194,8 +324,19 @@ def fake_bus(monkeypatch):
 
 @pytest.fixture
 def packaged(monkeypatch):
-    """默认把环境伪装成"已打包"，让 check_async 越过第一道门。"""
+    """把环境伪装成「Windows 上已打包」。
+
+    同时 patch 两处：
+      - _is_packaged：决定是否允许自动更新；
+      - sys.platform：download_and_apply_async 的平台门。
+
+    只在 Windows 上真实运行时，"已打包"与"是 Windows"才是同一条
+    前提；测试要在任意 CI 平台跑，必须把两者一起伪装。不这样做的话，
+    test_download_and_apply_* 会在 Linux/macOS 上因平台门提前返回，
+    既掩盖真实意图又导致断言失败。
+    """
     monkeypatch.setattr(updater, "_is_packaged", lambda: True)
+    monkeypatch.setattr(updater.sys, "platform", "win32")
 
 
 def _install_fake_checker(monkeypatch):
@@ -255,10 +396,12 @@ def test_check_async_starts_checker(qapp, packaged, monkeypatch):
     assert mgr.check_async() is True
     assert mgr._checker is fake
     fake.start.assert_called_once()
-    # 两条信号都接到（具体槽用 is 断言留到 _on_checked 的测试）：
-    # 检查信号对象被 connect 调用过即可，不深究连接的是谁。
-    fake.finished.connect.assert_called_once()
-    fake.checked.connect.assert_called_once()
+
+    # 槽身份断言：finished → deleteLater，checked → mgr._on_checked。
+    # 只断言「被连接一次」太弱：若代码误改成把 _on_checked 连到
+    # finished，测试仍然绿。
+    assert fake.finished.connect.call_args.args[0] is fake.deleteLater
+    assert fake.checked.connect.call_args.args[0] == mgr._on_checked
 
 
 # ===================== UpdateManager._on_checked =====================
@@ -295,18 +438,49 @@ def test_on_checked_rejects_non_dict_info(qapp, fake_bus, info):
 
 
 @pytest.mark.parametrize("info", [
-    {},                                               # 全缺
-    {"version": "3.1.0"},                             # 缺 url/sha
-    {"version": "3.1.0", "download_url": "x"},        # 缺 sha
-    {"version": "3.1.0", "sha256": "a"},              # 缺 url
-    {"download_url": "x", "sha256": "a"},             # 缺 version
-    {"version": "", "download_url": "x", "sha256": "a"},  # 空串算缺
+    {},                                                      # 全缺
+    {"version": "3.1.0"},                                    # 缺 url/sha
+    {"version": "3.1.0", "download_url": "https://x/y"},     # 缺 sha
+    {"version": "3.1.0", "sha256": "a" * 64},                # 缺 url
+    {"download_url": "https://x/y", "sha256": "a" * 64},     # 缺 version
+    # 空串同样算缺
+    {"version": "", "download_url": "https://x/y", "sha256": "a" * 64},
+    {"version": "3.1.0", "download_url": "", "sha256": "a" * 64},
+    {"version": "3.1.0", "download_url": "https://x/y", "sha256": ""},
 ])
 def test_on_checked_rejects_missing_required_fields(qapp, fake_bus, info):
     """required 是 (version, download_url, sha256)，任一缺失或为空
     都拒绝更新并跳过广播。"""
     mgr = UpdateManager(manifest_url=_REAL_URL)
     mgr._on_checked({"has_update": True, "info": info, "error": None})
+    assert fake_bus.calls == []
+    assert mgr._pending_info == {}
+
+
+@pytest.mark.parametrize("url", [
+    "x",                              # 无 scheme
+    "file:///tmp/evil.exe",           # file: 协议
+    "ftp://example.com/app.exe",      # ftp: 协议
+    "javascript:alert(1)",            # 明显恶意
+    "https://",                       # 有 scheme 无 host
+    "//example.com/app.exe",          # 协议相对
+])
+def test_on_checked_rejects_unsafe_download_url(qapp, fake_bus, url):
+    """required 字段齐全但 url 协议非法：必须拒绝，不广播。
+
+    这里检查的是 _is_safe_download_url 的第二道门（第一道门只查
+    字段非空，不校验协议）。避免被劫持的 version.json 把
+    download_url 指向 file:// 等本地资源。
+    """
+    mgr = UpdateManager(manifest_url=_REAL_URL)
+    mgr._on_checked({
+        "has_update": True, "error": None,
+        "info": {
+            "version": "3.1.0",
+            "download_url": url,
+            "sha256": "a" * 64,
+        },
+    })
     assert fake_bus.calls == []
     assert mgr._pending_info == {}
 
@@ -338,6 +512,25 @@ def test_download_and_apply_skips_when_not_packaged(qapp, monkeypatch):
     assert mgr._downloader is None
 
 
+def test_download_and_apply_skips_on_non_windows(qapp, monkeypatch):
+    """非 Windows 平台必须早退：DETACHED_PROCESS 等常量是 Windows
+    专属，走到 Popen 会 AttributeError。
+
+    只 patch 平台，不 patch _is_packaged——验证平台门在打包门之后
+    独立生效。
+    """
+    monkeypatch.setattr(updater, "_is_packaged", lambda: True)
+    monkeypatch.setattr(updater.sys, "platform", "linux")
+    mgr = UpdateManager(manifest_url=_REAL_URL)
+    mgr._pending_info = {
+        "version": "3.1.0",
+        "download_url": "https://x/y",
+        "sha256": "a" * 64,
+    }
+    assert mgr.download_and_apply_async() is False
+    assert mgr._downloader is None
+
+
 def test_download_and_apply_skips_without_pending(qapp, packaged):
     mgr = UpdateManager(manifest_url=_REAL_URL)
     assert mgr.download_and_apply_async() is False
@@ -347,7 +540,10 @@ def test_download_and_apply_skips_without_pending(qapp, packaged):
 def test_download_and_apply_skips_when_already_running(qapp, packaged):
     mgr = UpdateManager(manifest_url=_REAL_URL)
     mgr._pending_info = {
-        "version": "3.1.0", "download_url": "u", "sha256": "s"}
+        "version": "3.1.0",
+        "download_url": "https://x/y",
+        "sha256": "a" * 64,
+    }
     existing = MagicMock(name="StaleDownloader")
     existing.isRunning.return_value = True
     mgr._downloader = existing
@@ -358,9 +554,9 @@ def test_download_and_apply_skips_when_already_running(qapp, packaged):
 
 
 @pytest.mark.parametrize("pending", [
-    {"version": "3.1.0", "sha256": "s"},              # 缺 download_url
-    {"version": "3.1.0", "download_url": "",  "sha256": "s"},  # 空 url
-    {"version": "3.1.0", "download_url": "u", "sha256": ""},   # 空 sha
+    {"version": "3.1.0", "sha256": "a" * 64},                      # 缺 url
+    {"version": "3.1.0", "download_url": "",  "sha256": "a" * 64}, # 空 url
+    {"version": "3.1.0", "download_url": "https://x/y", "sha256": ""},  # 空 sha
 ])
 def test_download_and_apply_rejects_incomplete_pending(
         qapp, packaged, pending):
@@ -384,9 +580,11 @@ def test_download_and_apply_starts_downloader(
     assert mgr.download_and_apply_async() is True
     assert mgr._downloader is fake
     fake.start.assert_called_once()
-    # 两条信号（生命周期 + 结果）都接上
-    assert fake.finished.connect.call_count == 1
-    assert fake.finished_download.connect.call_count == 1
+
+    # 生命周期槽是 deleteLater（MagicMock 每次属性访问返回同一
+    # 子 mock，is 比较成立）；结果槽是 _on_downloaded。
+    assert fake.finished.connect.call_args.args[0] is fake.deleteLater
+    assert fake.finished_download.connect.call_args.args[0] == mgr._on_downloaded
 
 
 # ===================== UpdateManager._on_downloaded =====================
@@ -411,6 +609,16 @@ def test_on_downloaded_failure_defaults_error_when_missing(
     mgr = UpdateManager(manifest_url=_REAL_URL)
     mgr._on_downloaded({"ok": False})
     assert fake_bus.calls[0][1]["error"] == "unknown"
+
+
+def test_on_downloaded_cancelled_publishes_nothing(qapp, fake_bus):
+    """取消不是失败：不发 UPDATE_FAILED，也不发 UPDATE_READY。"""
+    mgr = UpdateManager(manifest_url=_REAL_URL)
+    mgr._downloader = MagicMock(name="Stale")
+    mgr._on_downloaded({"ok": False, "cancelled": True, "error": "下载已取消"})
+
+    assert mgr._downloader is None
+    assert fake_bus.calls == []
 
 
 def test_on_downloaded_success_publishes_update_ready(qapp, fake_bus):

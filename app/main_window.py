@@ -80,6 +80,7 @@ class MainWindow(QWidget):
         # 主窗口被监听者列表强引用住（测试 / 多实例场景下必现）。
         self._lang_cb = self._on_language_changed
         on_language_changed(self._lang_cb)
+        self.destroyed.connect(self._detach_main_lang_listener)
 
         self.setWindowTitle(tr("app.title"))
         self.cal.set_net_holiday(self.holiday_mgr.apply_cached())
@@ -383,6 +384,13 @@ class MainWindow(QWidget):
             self.retranslate_ui()
         except Exception:
             logger.exception("语言切换后刷新主窗口 UI 失败")
+            
+    def _detach_main_lang_listener(self, _obj=None):
+        """窗口析构时卸载语言监听。幂等。"""
+        try:
+            off_language_changed(self._lang_cb)
+        except Exception:
+            logger.debug("窗口销毁时卸载语言监听失败", exc_info=True)
 
     def retranslate_ui(self):
         """刷新所有依赖 tr() 的静态文本。不改变任何控件状态。"""
@@ -448,7 +456,7 @@ class MainWindow(QWidget):
             return
         try:
             pct = int(data.get("percent", -1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return
         if pct < 0:
             return

@@ -651,5 +651,7 @@ class LunarCalendarWidget(QCalendarWidget):
     def retranslate_ui(self):
         """语言切换后刷新周几表头 + 缓存文本（lunar_text 含 tr() 结果）。"""
         self.setLocale(QLocale(get_language()))
-        self._fix_week_header_color()      # locale 变更后重设格式，幂等
         self._invalidate_cell_cache()
+        self._fix_week_header_color()      
+        self.update()
+      

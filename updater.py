@@ -214,7 +214,7 @@ class UpdateDownloader(QThread):
         """线程安全地请求中止下载。shutdown 时由 UpdateManager 调用。"""
         self._cancelled.set()
 
-    # ---------- bat 脚本生成 ----------
+        # ---------- bat 脚本生成 ----------
     @staticmethod
     def _build_bat_script() -> str:
         """
@@ -227,8 +227,9 @@ class UpdateDownloader(QThread):
             2. move /y "%NEW%" "%EXE%"   ← 再顶上新 exe
             3. start "" "%EXE%"          ← 最后启动
 
-        失败分支里不出现 start，保证 bat.index('start "" "%EXE%"')
-        命中的永远是"启动新版本"这一句。
+        `start "" "%EXE%"` 在正常路径（:do_move 成功）与回滚路径
+        （:rollback 成功）各出现一次，两条路径互斥。若做自动化检查，
+        不能用"只出现一次"作为约束。
         """
         return (
             "@echo off\r\n"
@@ -273,13 +274,17 @@ class UpdateDownloader(QThread):
             ":rollback\r\n"
             'call :log "rollback: restore old"\r\n'
             'move /y "%OLD%" "%EXE%" >nul 2>>"%LOG%"\r\n'
+            "if errorlevel 1 (\r\n"
+            '    call :log "rollback failed - cannot restore old"\r\n'
+            "    goto cleanup\r\n"
+            ")\r\n"
             'call :log "rollback: start old"\r\n'
             'start "" "%EXE%"\r\n'
             "goto cleanup\r\n"
             "\r\n"
             ":cleanup\r\n"
             'del /f /q "%NEW%" >nul 2>&1\r\n'
-            'del "%~f0"\r\n'
+            'del "%~f0" >nul 2>&1\r\n'
             "exit /b 0\r\n"
             "\r\n"
             ":log\r\n"
@@ -500,6 +505,10 @@ class UpdateManager(QObject):
         """
         if not _is_packaged():
             logger.warning("非打包环境，拒绝执行自动替换")
+            return False
+        
+        if sys.platform != "win32":
+            logger.warning("自动替换仅支持 Windows，当前平台为 %s", sys.platform)
             return False
         if not self._pending_info:
             logger.warning("无待下载的更新信息")
