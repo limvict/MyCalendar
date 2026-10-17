@@ -15,7 +15,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\DesktopCalendar
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=..\release
+OutputDir=..\dist
 OutputBaseFilename=DesktopCalendar_Setup_{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
@@ -31,7 +31,7 @@ CloseApplicationsFilter=*.exe
 RestartApplications=no
 
 [Languages]
-Name: "chinese"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinese"; MessagesFile: ".\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
