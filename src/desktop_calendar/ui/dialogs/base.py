@@ -11,6 +11,7 @@
 本模块而不引入循环依赖。
 """
 from typing import Callable, Optional
+from functools import partial
 
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox
 
@@ -76,49 +77,24 @@ retranslate_button_box = _retranslate_button_box
 
 # ===================== 语言联动 Mixin =====================
 class RetranslatableDialog:
-    """
-    让对话框自动跟随 i18n 语言切换的 mixin。
-
-    ---- 子类契约 ----
-    1. 继承顺序：``class Foo(RetranslatableDialog, QDialog)``。
-       本 mixin 必须放在 QObject 派生类**之前**；否则 MRO 走不到本
-       mixin 的 ``__init__``，监听不会被挂载。
-
-    2. 构造末尾**显式**调用一次 ``self.retranslate_ui()``：
-       本 mixin 在 ``__init__`` 里挂载监听，但不会主动触发首次填充
-       （挂载时子类控件尚未创建）。首屏文案由子类自己负责。
-
-    3. 实现 ``retranslate_ui()``：刷新所有依赖 ``tr()`` 的静态文本。
-       **不得**修改任何用户输入状态（勾选、数值、选中项）。
-
-    ---- 生命周期 ----
-    - 挂载：``__init__`` 时把 ``self.retranslate_ui`` 注册到 i18n 监听。
-    - 卸载：``done()`` 被重写为"先卸载再 super"；同时连接
-      ``QObject.destroyed`` 做兜底（覆盖 ``deleteLater`` 等不经过
-      ``done`` 的销毁路径）。两者都调用幂等的
-      ``_detach_language_listener``，重复调用安全。
-    """
-
-    # 类级默认值，仅为可读性；实例化后立即被 __init__ 覆盖。
     _retranslate_cb: Optional[Callable[[str], None]] = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        cb = self.retranslate_ui
+        cb = self._on_language_changed
         self._retranslate_cb = cb
-        try:
-            self.destroyed.connect(self._detach_language_listener)
-        except Exception:
-            # 理论上 QObject 一定有 destroyed；防御性 try 避免因信号连接
-            # 失败导致对话框整体构造失败。此时监听仍已挂载，done() 会
-            # 在正常关闭路径兜底卸载。
-            logger.exception("连接 destroyed 信号失败，仅依赖 done() 卸载")
-        # connect 之后再挂载：若 connect 失败，本行仍会执行，至少
-        # done() 路径能保证卸载；反过来则会出现"已挂载但无兜底"的窗口。
+        # 关键：destroyed 触发时 C++ 对象已被删除，访问 self 的任何属性
+        # 都会抛 RuntimeError。用 partial 直接绑 off_language_changed，
+        # 完全不经过 self。
+        self.destroyed.connect(partial(off_language_changed, cb))
         on_language_changed(cb)
 
+    def _on_language_changed(self, _lang: str = "") -> None:
+        """适配 i18n.set_language 的 Callable[[str], None] 约定。"""
+        self.retranslate_ui()
+
     def _detach_language_listener(self, _obj=None):
-        """注销语言监听。幂等：重复调用 / 已销毁时是 no-op。"""
+        """done() 路径用。destroyed 路径由 partial 直接处理，不走这里。"""
         cb = getattr(self, "_retranslate_cb", None)
         if cb is None:
             return
@@ -126,11 +102,9 @@ class RetranslatableDialog:
         self._retranslate_cb = None
 
     def done(self, r):
-        # exec() 正常结束的必经之路（accept / reject / close 都走这里）
         self._detach_language_listener()
         super().done(r)
 
     def retranslate_ui(self):
-        """子类必须实现。默认实现显式抛错，避免漏实现被静默吞掉。"""
         raise NotImplementedError(
             f"{type(self).__name__} 必须实现 retranslate_ui()")

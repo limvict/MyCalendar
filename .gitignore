@@ -31,4 +31,8 @@ Thumbs.db
 *.log
 
 # pytest 临时产物
-.pytest_tmp/
+.pytest_tmp/build/app/
+dist/
+release/*.exe
+__pycache__/
+*.pyc

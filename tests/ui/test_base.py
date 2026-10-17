@@ -2,7 +2,7 @@
 """RetranslatableDialog 生命周期单测。"""
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox
 import pytest
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QCoreApplication, QEvent
 from desktop_calendar.config.i18n import (
     _listeners, set_language, off_language_changed,
 )
@@ -52,10 +52,10 @@ def test_language_change_triggers_retranslate(qtbot):
 
 
 def test_done_detaches_listener(qtbot):
-    set_language("zh_CN") 
+    set_language("zh_CN")
     dlg = _Dlg()
     before = dlg.translate_calls
-    set_language("en_US")         
+    set_language("en_US")
     assert dlg.translate_calls == before + 1
     dlg.done(QDialog.DialogCode.Accepted)
     assert _listeners == []
@@ -63,15 +63,13 @@ def test_done_detaches_listener(qtbot):
     dlg.done(QDialog.DialogCode.Rejected)
     assert _listeners == []
 
-
 def test_destroyed_fallback_detaches(qtbot):
     """不经过 done，直接 deleteLater → destroyed 兜底卸载。"""
     dlg = _Dlg()
     assert len(_listeners) == 1
     dlg.deleteLater()
-    qtbot.waitUntil(lambda: _listeners == [], timeout=1000)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert _listeners == []
-
 
 def test_make_button_box_text_and_wiring(qtbot):
     dlg = _Dlg()
@@ -84,62 +82,3 @@ def test_make_button_box_text_and_wiring(qtbot):
 def test_retranslate_button_box_none_safe():
     # 不应抛 AttributeError
     retranslate_button_box(None)
-    
-import weakref
-
-_listeners: list[weakref.WeakMethod] = []
-_current_language: str | None = None
-
-
-def _register(obj, method):
-    ref = weakref.WeakMethod(method)
-    _listeners.append(ref)
-    obj.destroyed.connect(lambda *_, ref=ref: _unregister(ref))
-
-
-def _unregister(ref):
-    try:
-        _listeners.remove(ref)
-    except ValueError:
-        pass
-
-
-class _Dlg(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.translate_calls = 0
-        self.retranslate_ui()                 # 初始化即计数 1
-        _register(self, self.retranslate_ui)
-
-    def retranslate_ui(self):
-        self.translate_calls += 1
-
-    def done(self, result: int = 0):
-        # 主动卸载，不依赖 destroyed 兜底
-        for ref in list(_listeners):
-            m = ref()
-            if m is not None and getattr(m, "__self__", None) is self:
-                _unregister(ref)
-        super().done(result)
-
-def set_language(lang):
-    global _current_language
-    if _current_language == lang:
-        return
-    _current_language = lang
-    for ref in list(_listeners):
-        m = ref()
-        if m is None:
-            _unregister(ref)
-        else:
-            m()
-        
-import pytest
-import tests.test_base as tb
-
-@pytest.fixture(autouse=True)
-def _reset_i18n():
-    tb._current_language = None
-    tb._listeners.clear()
-    yield
-    tb._listeners.clear()

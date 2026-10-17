@@ -1,0 +1,16 @@
+{
+  "memorial_days": [],
+  "memorial_cfg": {
+    "enable_remind": true,
+    "sound_enable": true,
+    "last_remind_date": "",
+    "remind_start_hour": 8,
+    "remind_end_hour": 22
+  },
+  "theme": null,
+  "topmost": false,
+  "opacity": 0.92,
+  "language": "zh_CN",
+  "config_version": 2,
+  "update_skipped_version": ""
+}
