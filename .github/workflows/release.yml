@@ -37,13 +37,18 @@ jobs:
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Patch version into updater.py & installer.iss
+      # 1) 版本注入：pyproject.toml + updater.py + installer.iss
+      - name: Patch version sources
         shell: bash
         env:
           VER: ${{ steps.ver.outputs.version }}
         run: python scripts/patch_updater.py
 
-      - name: Verify version consistency
+      # 2) 构建前一致性检查：此时还没有 manifest，不加 --manifest-required
+      - name: Verify version sources
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
         run: python scripts/check_version.py
 
       - name: Build exe (PyInstaller onefile)
@@ -61,14 +66,10 @@ jobs:
           echo "OK: dist/DesktopCalendar.exe = $SIZE bytes"
           [ "$SIZE" -ge 1000000 ] || { echo "::error::exe too small"; exit 1; }
 
-      - name: Compute SHA-256
-        id: sha
-        shell: bash
-        run: |
-          HASH=$(sha256sum dist/DesktopCalendar.exe | awk '{print $1}')
-          echo "sha256=$HASH" >> "$GITHUB_OUTPUT"
-
+      # 3) Inno Setup：/DMyAppVersion 保留，作为 #define 的显式覆盖，
+      #    与 patch 双重保险（两者一致，check 已断言）
       - name: Build installer (Inno Setup)
+        shell: pwsh
         run: |
           choco install innosetup -y --no-progress
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
@@ -81,22 +82,20 @@ jobs:
           }
           Write-Host "OK: $($setup.Name) ($($setup.Length) bytes)"
 
-      - name: Write version.json
+      # 4) manifest 由脚本生成，schema 唯一来源
+      - name: Generate update manifest
         shell: bash
         env:
           VER: ${{ steps.ver.outputs.version }}
-          SHA: ${{ steps.sha.outputs.sha256 }}
-          REPO: ${{ github.repository }}
-        run: |
-          cat > dist/version.json <<EOF
-          {
-            "version": "$VER",
-            "download_url": "https://github.com/$REPO/releases/download/${GITHUB_REF_NAME}/DesktopCalendar.exe",
-            "sha256": "$SHA",
-            "release_notes": "See release page."
-          }
-          EOF
-          cat dist/version.json
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/patch_updater.py --manifest
+
+      # 5) 构建后一致性检查：manifest 已存在，强制校验
+      - name: Verify version + manifest
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: python scripts/check_version.py --manifest-required
 
       - uses: softprops/action-gh-release@v2
         with:
