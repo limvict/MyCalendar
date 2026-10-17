@@ -267,147 +267,98 @@ class UpdateDownloader(QThread):
         """线程安全地请求中止下载。shutdown 时由 UpdateManager 调用。"""
         self._cancelled.set()
 
-        # ---------- bat 脚本生成 ----------
-    @staticmethod
+    # ---------- bat 脚本生成 ----------
     def _build_bat_script() -> str:
-        """
-        返回 bat 脚本。路径 / PID / 日志位置通过环境变量传入
-        （DLC_PID / DLC_EXE / DLC_NEW / DLC_OLD / DLC_LOG / DLC_WAIT /
-        DLC_PROBE / DLC_STATE / DLC_VERSION），脚本里是 %DLC_*% 占位符，
-        避免在 Python 侧做 cmd 转义。
+        lines = [
+            "@echo off",
+            "chcp 65001 >nul",
+            "setlocal enableextensions",
+            'set "TARGET_PID=%DLC_PID%"',
+            'set "EXE=%DLC_EXE%"',
+            'set "NEW=%DLC_NEW%"',
+            'set "OLD=%DLC_OLD%"',
+            'set "LOG=%DLC_LOG%"',
+            'set "STATE=%DLC_STATE%"',
+            'set "VER=%DLC_VERSION%"',
+            "set /a WAIT_MAX=%DLC_WAIT%",
+            "set /a WAIT_COUNT=0",
+            'for %%F in ("%EXE%") do set "EXE_NAME=%%~nxF"',
+            "",
+            'call :log "updater start pid=%TARGET_PID% ver=%VER%"',
+            "",
+            ":waitloop",
+            'tasklist /FI "PID eq %TARGET_PID%" 2>nul | find "%TARGET_PID%" >nul',
+            "if errorlevel 1 goto do_move",
+            "set /a WAIT_COUNT+=1",
+            "if %WAIT_COUNT% GEQ %WAIT_MAX% goto do_move",
+            "ping -n 2 127.0.0.1 >nul",
+            "goto waitloop",
+            "",
+            ":do_move",
+            'call :log "backup old"',
+            'move /y "%EXE%" "%OLD%" >nul 2>>"%LOG%"',
+            "if errorlevel 1 (",
+            'call :log "backup old failed"',
+            'call :write_state "backup_failed"',
+            "goto cleanup_keep_new",
+            ")",
+            'call :log "install new"',
+            'move /y "%NEW%" "%EXE%" >nul 2>>"%LOG%"',
+            "if errorlevel 1 (",
+            'call :log "install new failed - rollback"',
+            "goto rollback",
+            ")",
+            'call :log "start new"',
+            'start "" "%EXE%"',
+            'call :log "update success"',
+            'del /f /q "%STATE%" >nul 2>&1',
+            "goto cleanup",
+            "",
+            ":rollback",
+            'call :log "rollback: restore old"',
+            'move /y "%OLD%" "%EXE%" >nul 2>>"%LOG%"',
+            "if errorlevel 1 (",
+            'call :log "rollback failed - cannot restore old"',
+            'call :write_state "rollback_failed"',
+            "goto cleanup",
+            ")",
+            'call :log "rollback: start old"',
+            'call :write_state "install_failed"',
+            'start "" "%EXE%"',
+            "goto cleanup",
+            "",
+            ":write_state",
+            '> "%STATE%" (',
+            "echo version=%VER%",
+            "echo reason=%~1",
+            'echo new_exe="%NEW%"',
+            'echo old_exe="%EXE%"',
+            'echo log_path="%LOG%"',
+            ")",
+            "goto :eof",
+            "",
+            ":cleanup",
+            'del /f /q "%NEW%" >nul 2>&1',
+            'del "%~f0" >nul 2>&1',
+            "exit /b 0",
+            "",
+            ":cleanup_keep_new",
+            'del "%~f0" >nul 2>&1',
+            "exit /b 0",
+            "",
+            ":log",
+            'echo [%DATE% %TIME%] %~1 >> "%LOG%"',
+            "goto :eof",
+        ]
+        return "\r\n".join(lines) + "\r\n"
 
-        关键顺序（不可调换）：
-            1. move /y "%EXE%" "%OLD%"   ← 先备份，否则 .old 变新文件
-            2. move /y "%NEW%" "%EXE%"   ← 再顶上新 exe
-            3. start "" "%EXE%"          ← 启动新版本
-            4. 探测 %DLC_PROBE% 秒：进程存活 → 删 .old；
-               进程已死 → 视为启动即崩，回滚 .old 并重启旧版本
-
-        失败路径设计：
-            - 所有"更新未完成"的分支都会调 :write_state 写标记；
-            - 标记由下次启动的 Python 侧消费（弹窗 + 重试/忽略）；
-            - 成功路径显式 del 标记，避免下次误报；
-            - backup_failed 分支保留 %NEW%（用户点重试时复用文件系统缓存），
-              并 start 旧版 —— 旧版此时还在原位，重启不会失败。
-
-        `start "" "%EXE%"` 在正常路径、探测失败回滚路径、安装失败
-        回滚路径、backup_failed 路径各出现一次，四条路径互斥。若做
-        自动化检查，不能用"只出现一次"作为约束。
-        """
-        return (
-            "@echo off\r\n"
-            "chcp 65001 >nul\r\n"
-            "setlocal enableextensions\r\n"
-            'set "TARGET_PID=%DLC_PID%"\r\n'
-            'set "EXE=%DLC_EXE%"\r\n'
-            'set "NEW=%DLC_NEW%"\r\n'
-            'set "OLD=%DLC_OLD%"\r\n'
-            'set "LOG=%DLC_LOG%"\r\n'
-            'set "STATE=%DLC_STATE%"\r\n'
-            'set "VER=%DLC_VERSION%"\r\n'
-            "set /a WAIT_MAX=%DLC_WAIT%\r\n"
-            "set /a WAIT_COUNT=0\r\n"
-            "set /a PROBE=%DLC_PROBE%\r\n"
-            'for %%F in ("%EXE%") do set "EXE_NAME=%%~nxF"\r\n'
-            "\r\n"
-            'call :log "updater start pid=%TARGET_PID% ver=%VER%"\r\n'
-            "\r\n"
-            ":waitloop\r\n"
-            'tasklist /FI "PID eq %TARGET_PID%" 2>nul | find "%TARGET_PID%" >nul\r\n'
-            "if errorlevel 1 goto do_move\r\n"
-            "set /a WAIT_COUNT+=1\r\n"
-            "if %WAIT_COUNT% GEQ %WAIT_MAX% goto do_move\r\n"
-            "ping -n 2 127.0.0.1 >nul\r\n"
-            "goto waitloop\r\n"
-            "\r\n"
-            ":do_move\r\n"
-            'call :log "backup old"\r\n'
-            'move /y "%EXE%" "%OLD%" >nul 2>>"%LOG%"\r\n'
-            "if errorlevel 1 (\r\n"
-            '    call :log "backup old failed - restart old, keep new"\r\n'
-            '    call :write_state "backup_failed"\r\n'
-            '    start "" "%EXE%"\r\n'
-            "    goto cleanup_keep_new\r\n"
-            ")\r\n"
-            'call :log "install new"\r\n'
-            'move /y "%NEW%" "%EXE%" >nul 2>>"%LOG%"\r\n'
-            "if errorlevel 1 (\r\n"
-            '    call :log "install new failed - rollback"\r\n'
-            "    goto rollback\r\n"
-            ")\r\n"
-            'call :log "start new"\r\n'
-            'start "" "%EXE%"\r\n'
-            'call :log "probe new version for %PROBE% seconds"\r\n'
-            "ping -n %PROBE% 127.0.0.1 >nul\r\n"
-            'tasklist /FI "IMAGENAME eq %EXE_NAME%" /FO CSV /NH 2>nul'
-            ' | find /I "%EXE_NAME%" >nul\r\n'
-            "if errorlevel 1 (\r\n"
-            '    call :log "probe failed - new version died, rollback"\r\n'
-            '    del /f /q "%EXE%" >nul 2>>"%LOG%"\r\n'
-            '    move /y "%OLD%" "%EXE%" >nul 2>>"%LOG%"\r\n'
-            "    if errorlevel 1 (\r\n"
-            '        call :log "probe rollback failed - cannot restore old"\r\n'
-            '        call :write_state "probe_rollback_failed"\r\n'
-            "        goto cleanup\r\n"
-            "    )\r\n"
-            '    call :log "probe rollback: start old"\r\n'
-            '    call :write_state "probe_failed"\r\n'
-            '    start "" "%EXE%"\r\n'
-            "    goto cleanup\r\n"
-            ")\r\n"
-            'call :log "new version alive - drop old backup"\r\n'
-            'del /f /q "%OLD%" >nul 2>&1\r\n'
-            'del /f /q "%STATE%" >nul 2>&1\r\n'
-            'call :log "update success"\r\n'
-            "goto cleanup\r\n"
-            "\r\n"
-            ":rollback\r\n"
-            'call :log "rollback: restore old"\r\n'
-            'move /y "%OLD%" "%EXE%" >nul 2>>"%LOG%"\r\n'
-            "if errorlevel 1 (\r\n"
-            '    call :log "rollback failed - cannot restore old"\r\n'
-            '    call :write_state "rollback_failed"\r\n'
-            "    goto cleanup\r\n"
-            ")\r\n"
-            'call :log "rollback: start old"\r\n'
-            'call :write_state "install_failed"\r\n'
-            'start "" "%EXE%"\r\n'
-            "goto cleanup\r\n"
-            "\r\n"
-            ":write_state\r\n"
-            '> "%STATE%" (\r\n'
-            "    echo version=%VER%\r\n"
-            "    echo reason=%~1\r\n"
-            '    echo new_exe="%NEW%"\r\n'
-            '    echo old_exe="%EXE%"\r\n'
-            '    echo log_path="%LOG%"\r\n'
-            ")\r\n"
-            "goto :eof\r\n"
-            "\r\n"
-            ":cleanup\r\n"
-            'del /f /q "%NEW%" >nul 2>&1\r\n'
-            'del "%~f0" >nul 2>&1\r\n'
-            "exit /b 0\r\n"
-            "\r\n"
-            ":cleanup_keep_new\r\n"
-            'del "%~f0" >nul 2>&1\r\n'
-            "exit /b 0\r\n"
-            "\r\n"
-            ":log\r\n"
-            'echo [%DATE% %TIME%] %~1 >> "%LOG%"\r\n'
-            "goto :eof\r\n"
-        )
-    
     # ---------- 主流程 ----------
     def run(self):
         result = {"ok": False, "error": None, "cancelled": False}
         exe_path = sys.executable
-        new_exe = os.path.join(
-            tempfile.gettempdir(), _tmp_exe_name(self._pid))
-        bat_path = os.path.join(
-            tempfile.gettempdir(), _tmp_bat_name(self._pid))
-        log_path = os.path.join(
-            tempfile.gettempdir(), _tmp_log_name(self._pid))
+        new_exe = os.path.join(tempfile.gettempdir(), _tmp_exe_name(self._pid))
+        bat_path = os.path.join(tempfile.gettempdir(), _tmp_bat_name(self._pid))
+        log_path = os.path.join(tempfile.gettempdir(), _tmp_log_name(self._pid))
         old_exe = exe_path + _OLD_EXE_SUFFIX
         state_path = _state_file_path()
 
@@ -460,41 +411,43 @@ class UpdateDownloader(QThread):
                     raise IOError(
                         "更新包校验失败（期望 "
                         f"{self._expected_sha[:12]}...，实际 "
-                        f"{actual[:12]}...），已中止更新")
+                        f"{actual[:12]}...），已中止更新"
+                    )
             else:
                 logger.warning(
                     "更新清单未提供 sha256，跳过完整性校验。"
-                    "请尽快在 version.json 中补充该字段。")
+                    "请尽快在 version.json 中补充该字段。"
+                )
 
             # UTF-8-SIG：带 BOM，让 cmd 按 UTF-8 解析，中文路径不乱码
             with open(bat_path, "w", encoding="utf-8-sig", newline="") as f:
                 f.write(self._build_bat_script())
 
             env = os.environ.copy()
-            env.update({
-                "DLC_PID": str(self._pid),
-                "DLC_EXE": exe_path,
-                "DLC_NEW": new_exe,
-                "DLC_OLD": old_exe,
-                "DLC_LOG": log_path,
-                "DLC_WAIT": str(_WAIT_EXIT_MAX_SEC),
-                "DLC_PROBE": str(_NEW_VERSION_PROBE_SEC + 1),
-                "DLC_STATE": state_path,
-                "DLC_VERSION": self._target_version,
-            })
+            env.update(
+                {
+                    "DLC_PID": str(self._pid),
+                    "DLC_EXE": exe_path,
+                    "DLC_NEW": new_exe,
+                    "DLC_OLD": old_exe,
+                    "DLC_LOG": log_path,
+                    "DLC_WAIT": str(_WAIT_EXIT_MAX_SEC),
+                    "DLC_PROBE": str(_NEW_VERSION_PROBE_SEC + 1),
+                    "DLC_STATE": state_path,
+                    "DLC_VERSION": self._target_version,
+                }
+            )
 
             subprocess.Popen(
                 ["cmd", "/c", bat_path],
                 creationflags=(
-                    subprocess.DETACHED_PROCESS
-                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                    subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
                 ),
                 close_fds=True,
                 env=env,
             )
             result["ok"] = True
-            logger.info(
-                f"更新包下载并校验完成，替换脚本已启动；日志: {log_path}")
+            logger.info(f"更新包下载并校验完成，替换脚本已启动；日志: {log_path}")
         except _DownloadCancelled:
             result["cancelled"] = True
             result["error"] = "下载已取消"
@@ -649,7 +602,7 @@ class UpdateManager(QObject):
         if not _is_packaged():
             logger.warning("非打包环境，拒绝执行自动替换")
             return False
-        
+
         if sys.platform != "win32":
             logger.warning("自动替换仅支持 Windows，当前平台为 %s", sys.platform)
             return False
@@ -720,7 +673,7 @@ class UpdateManager(QObject):
                     rollback_failed / probe_rollback_failed。
         """
         return consume_state_file()
-    
+
     # ---------- 关闭 ----------
     def shutdown(self):
         """退出时等待线程收尾，避免 Qt 报 QThread destroyed while running。"""
