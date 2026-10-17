@@ -66,7 +66,7 @@ def _build_exe_name() -> str:
 def main() -> int:
     # 1. 版本号一致
     py_ver = _grab(
-        ROOT / "updater.py",
+        ROOT / "src" / "desktop_calendar" / "services" / "updater.py",
         r'CURRENT_VERSION\s*=\s*"([^"]+)"',
         "CURRENT_VERSION",
     )

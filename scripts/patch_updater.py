@@ -45,7 +45,7 @@ def patch(path: pathlib.Path, pattern: str, repl: str, label: str) -> None:
 
 
 patch(
-    ROOT / "updater.py",
+    ROOT / "src" / "desktop_calendar" / "services" / "updater.py",
     r'CURRENT_VERSION\s*=\s*"[^"]*"',
     f'CURRENT_VERSION = "{VER}"',
     "CURRENT_VERSION",
