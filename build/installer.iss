@@ -2,7 +2,7 @@
 ; 关键决策：默认装到 %LOCALAPPDATA%\Programs\，保证自动更新有写权限。
 
 #define MyAppName "桌面日历"
-#define MyAppVersion "3.0.4"
+#define MyAppVersion "3.0.5"
 #define MyAppPublisher "YourName"
 #define MyAppExeName "DesktopCalendar.exe"
 #define MyAppId "{{8F3C2A10-4B7E-4D91-9F2A-1C5E8B7D3A66}"

@@ -45,7 +45,7 @@ UPDATE_MANIFEST_URL = "https://github.com/limvict/MyCalendar/releases/latest/dow
 
 # 当前程序版本，与打包时 installer.iss 的 AppVersion 保持一致
 # CI 建议加脚本校验（见 scripts/check_version.py）
-CURRENT_VERSION = "3.0.4"
+CURRENT_VERSION = "3.0.5"
 
 # 网络超时（秒）
 CHECK_TIMEOUT = 10
