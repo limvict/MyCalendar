@@ -2,7 +2,7 @@
 import calendar
 import json
 
-from constants import DEFAULT_THEME, REFERENCE_LEAP_YEAR, load_theme
+from desktop_calendar.config.constants import DEFAULT_THEME, REFERENCE_LEAP_YEAR, load_theme
 
 
 def test_reference_leap_year_is_leap():

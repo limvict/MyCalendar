@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from app import auto_start
+from desktop_calendar.app import auto_start
 
 
 @pytest.fixture

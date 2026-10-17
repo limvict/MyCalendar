@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 from PyQt6.QtCore import QDate
 
-from reminder_manager import ReminderManager
+from desktop_calendar.core.reminder_manager import ReminderManager
 
 
 class FakeCfg:

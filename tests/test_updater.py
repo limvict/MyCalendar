@@ -22,8 +22,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import updater
-from updater import (
+from desktop_calendar.services import updater
+from desktop_calendar.services.updater import (
     UpdateDownloader,
     UpdateManager,
     _is_newer,
@@ -35,7 +35,7 @@ from updater import (
     _tmp_bat_name,
     _tmp_exe_name,
 )
-from event_bus import EventType
+from desktop_calendar.services.event_bus import EventType
 
 
 # ===================== 纯函数：_parse_version =====================

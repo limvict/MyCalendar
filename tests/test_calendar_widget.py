@@ -2,8 +2,8 @@
 """LunarCalendarWidget 的对外契约 + 内部索引测试。"""
 from PyQt6.QtCore import QDate
 
-import calendar_widget as cw
-from constants import DEFAULT_THEME
+from desktop_calendar.ui import calendar_widget as cw
+from desktop_calendar.config.constants import DEFAULT_THEME
 
 
 def _make_widget(memorials=None):

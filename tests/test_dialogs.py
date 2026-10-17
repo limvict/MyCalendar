@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
-from dialogs import AddMemorialDialog
-from memorial import REPEAT_WEEK, REPEAT_YEAR
+from desktop_calendar.ui.dialogs import AddMemorialDialog
+from desktop_calendar.core.memorial import REPEAT_WEEK, REPEAT_YEAR
 
 # ---------- helpers ----------
 

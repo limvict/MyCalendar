@@ -1,4 +1,4 @@
-# coding: utf-8
+﻿# coding: utf-8
 """pytest 全局配置。
 
   - 强制 Qt 离屏模式（必须在 import PyQt6 前设置）；
@@ -66,7 +66,7 @@ def _kill_modals(monkeypatch):
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
     """每个测试使用独立临时配置目录，并重置 ConfigManager 单例。"""
-    import config as config_mod
+    from desktop_calendar.config import config as config_mod
 
     monkeypatch.setattr(config_mod, "_get_base_dir", lambda: str(tmp_path))
     monkeypatch.setattr(config_mod, "CONFIG_SAVE_DEBOUNCE_MS", 10)
@@ -87,8 +87,8 @@ def isolated_config(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_singletons():
-    from event_bus import event_bus
-    import i18n
+    from desktop_calendar.services.event_bus import event_bus
+    from desktop_calendar.config import i18n
 
     event_bus.clear_all()
     i18n._listeners.clear()

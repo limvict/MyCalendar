@@ -1,7 +1,7 @@
 # coding: utf-8
 from datetime import datetime
 
-import holiday_manager as hm_mod
+from desktop_calendar.core import holiday_manager as hm_mod
 
 
 class _BareHM(hm_mod.HolidayManager):

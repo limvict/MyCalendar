@@ -3,13 +3,13 @@ from datetime import date
 
 from PyQt6.QtCore import QDate
 
-import lunar as lunar_mod
-import memorial as mem_mod
+from desktop_calendar.core import lunar as lunar_mod
+from desktop_calendar.core import memorial as mem_mod
 import pytest
 
 
 def test_qdate_to_pydate():
-    from lunar import qdate_to_pydate
+    from desktop_calendar.core.lunar import qdate_to_pydate
     assert qdate_to_pydate(QDate(2024, 2, 29)) == date(2024, 2, 29)
 
 

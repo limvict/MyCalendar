@@ -43,7 +43,7 @@ def test_migrate_fixes_bad_types(isolated_config):
 
 def test_init_config_defaults_tolerates_plain_object():
     """传入无 _migrate / save_debounced 的对象时不应抛异常。"""
-    import utils as utils_mod
+    from desktop_calendar.utils import helpers as utils_mod
 
     class Bare:
         pass
@@ -54,7 +54,7 @@ def test_init_config_defaults_tolerates_plain_object():
 
 def test_init_config_defaults_delegates_to_migrate(isolated_config):
     """init_config_defaults 应委托 _migrate，两者补齐的字段必须一致。"""
-    import utils as utils_mod
+    from desktop_calendar.utils import helpers as utils_mod
 
     mod, cm = isolated_config
 

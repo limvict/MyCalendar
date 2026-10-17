@@ -3,23 +3,24 @@
 # 用法：pyinstaller build/app.spec
 
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
-# spec 里 __file__ 不可靠，用 SPECPATH（PyInstaller 注入）
 ROOT = Path(SPECPATH).parent
+SRC  = ROOT / "src"
+PKG  = SRC / "desktop_calendar"
 
 a = Analysis(
     [str(ROOT / "main.py")],
-    pathex=[str(ROOT)],
+    pathex=[str(ROOT), str(SRC)],
     binaries=[],
     datas=[
-        # 把资源打进包内；get_resource_path 用 sys._MEIPASS 定位
         (str(ROOT / "assets"), "assets"),
-        (str(ROOT / "theme.json"), "."),
+        (str(PKG / "config" / "theme.json"), "."),
     ],
     hiddenimports=[
-        # cnlunar / chinese_calendar 是可选依赖，静态分析抓不全
         "cnlunar",
         "chinese_calendar",
+        *collect_submodules("desktop_calendar"),
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -42,8 +43,8 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,           # UPX 会被部分杀软误报，关掉
-    console=False,       # GUI 程序；sys.executable 即 exe 本体
+    upx=False,
+    console=False,
     disable_windowed_traceback=False,
     icon=str(ROOT / "assets" / "app.ico"),
 )

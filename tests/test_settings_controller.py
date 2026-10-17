@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app import settings_controller
+from desktop_calendar.app import settings_controller
 
 
 # ---------- 桩 ----------

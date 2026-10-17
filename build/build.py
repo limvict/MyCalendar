@@ -30,7 +30,7 @@ def _sha256(path: Path) -> str:
 def _sync_version(new_version: str):
     """把新版本号同步进 updater.py 和 installer.iss，避免手工漂移。"""
     # --- updater.py ---
-    updater_py = ROOT / "updater.py"
+    updater_py = ROOT / "src" / "desktop_calendar" / "services" / "updater.py"
     src = updater_py.read_text(encoding="utf-8")
     new_src, n = re.subn(
         r'(CURRENT_VERSION\s*=\s*)"[^"]+"',

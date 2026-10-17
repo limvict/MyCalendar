@@ -1,22 +1,21 @@
 # coding: utf-8
 """
-程序入口。
+程序入口（薄引导层）。
 
-所有业务逻辑位于 app 包内，本文件只做 QApplication 装配。
+只做两件事：
+  1. 把 src/ 加入 sys.path（未 pip install -e . 时兜底）
+  2. 调 desktop_calendar.app.entry.main()
+
+真正的启动逻辑在 src/desktop_calendar/app/entry.py。
 """
 import sys
+from pathlib import Path
 
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication
+_src = Path(__file__).resolve().parent / "src"
+if _src.is_dir() and str(_src) not in sys.path:
+    sys.path.insert(0, str(_src))
 
-from config import get_resource_path
-from app.main_window import MainWindow
-
+from desktop_calendar.app.entry import main
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-    app.setWindowIcon(QIcon(get_resource_path("assets/app.ico")))
-    w = MainWindow()
-    w.show()
-    sys.exit(app.exec())
+    raise SystemExit(main())

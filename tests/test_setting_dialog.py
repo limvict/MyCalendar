@@ -8,7 +8,7 @@ import json
 
 from PyQt6.QtWidgets import QFileDialog
 
-from dialogs import SettingDialog
+from desktop_calendar.ui.dialogs import SettingDialog
 
 
 def _make_dlg(cfg=None):
