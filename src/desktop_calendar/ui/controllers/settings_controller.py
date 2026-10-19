@@ -12,12 +12,14 @@
 import copy
 from PyQt6.QtWidgets import QDialog
 
-from desktop_calendar.config.config import config, get_logger
-from desktop_calendar.config.i18n import set_language
+from desktop_calendar.ui.controllers.auto_start_ui import (
+    check_auto_start, apply_auto_start,
+)
 from desktop_calendar.ui.dialogs import SettingDialog
-from desktop_calendar.services.event_bus import event_bus, EventType
-
-from .auto_start import check_auto_start, apply_auto_start
+from desktop_calendar.contracts.event_bus import event_bus
+from desktop_calendar.contracts.events import EventType
+from desktop_calendar.config.i18n import set_language
+from desktop_calendar.config.config import config, get_logger
 
 logger = get_logger()
 

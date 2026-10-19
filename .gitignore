@@ -10,33 +10,32 @@ env/
 .pytest_cache/
 .pytest_tmp/
 
-# ---------- PyInstaller 中间产物 ----------
-# 注意：build/ 本身是源码目录（app.spec / build.py / installer.iss / 语言文件），不能整体忽略
+# ---------- PyInstaller / build ----------
 /build/app/
+/build/lib/
 /dist/
 *.spec.bak
 
-# ---------- 发布产物 ----------
-# release/ 全部是构建输出；如需保留说明文件，取消下一行注释
+# ---------- release output ----------
 /release/
 # !/release/README.md
 
-# ---------- 通用构建产物 ----------
+# ---------- generic build artifacts ----------
 *.exe
 *.msi
 *.dmg
 *.pkg
 
-# ---------- 根目录临时文件 ----------
+# ---------- root temp files ----------
 /tmp_app.exe
 /tmp_v.json
 
-# ---------- IDE / 系统 ----------
+# ---------- IDE / OS ----------
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
-# ---------- 敏感 / 日志 ----------
+# ---------- secrets / logs ----------
 .env
 *.log

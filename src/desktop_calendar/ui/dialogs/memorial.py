@@ -498,9 +498,9 @@ class MemorialDialog(RetranslatableDialog, QDialog):
                 date_text = tr("memorial.manage.date_fmt").format(
                     month=item["month"], day=item["day"]
                 )
-
+            display_name = item.get("name") or tr("memorial.default_name")
             text = (
-                f"{status_text} | {item['name']} | {repeat} | "
+                f"{status_text} | {display_name} | {repeat} | "
                 f"{tname}{leap}{date_text} | "
                 f"{tr('memorial.manage.advance_fmt').format(advance=advance)}"
             )

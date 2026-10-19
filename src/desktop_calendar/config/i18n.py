@@ -71,8 +71,9 @@ def on_language_changed(cb: Callable[[str], None]) -> None:
         _listeners.append(cb)
 
 
-def off_language_changed(cb: Callable[[str], None]) -> None:
-    """注销语言切换监听者；未注册时不报错（幂等）。"""
+def off_language_changed(cb: Callable[[str], None], *_args) -> None:
+    """注销语言切换监听者；未注册时不报错（幂等）。
+    *_args 兼容 Qt destroyed(QObject) 信号的多余参数。"""
     try:
         _listeners.remove(cb)
     except ValueError:

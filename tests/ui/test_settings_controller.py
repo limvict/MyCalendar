@@ -8,8 +8,9 @@
 from unittest.mock import MagicMock
 
 import pytest
+pytestmark = pytest.mark.ui
 
-from desktop_calendar.app import settings_controller
+from desktop_calendar.ui.controllers import settings_controller
 
 
 # ---------- 桩 ----------

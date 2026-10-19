@@ -86,8 +86,8 @@ def isolated_config(tmp_path, monkeypatch):
     
 
 @pytest.fixture(autouse=True)
-def _reset_singletons():
-    from desktop_calendar.services.event_bus import event_bus
+def _some_fixture():
+    from desktop_calendar.contracts.event_bus import event_bus
     from desktop_calendar.config import i18n
 
     event_bus.clear_all()
@@ -116,3 +116,8 @@ def fake_lunar():
             for k, v in attrs.items():
                 setattr(self, k, v)
     return FakeLunar
+
+@pytest.fixture
+def config(isolated_config):
+    """兼容历史测试：config 即 isolated_config 的别名。"""
+    return isolated_config

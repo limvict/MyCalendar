@@ -4,7 +4,10 @@ from PyQt6.QtCore import QDate
 
 from desktop_calendar.ui import calendar_widget as cw
 from desktop_calendar.config.constants import DEFAULT_THEME
-
+from desktop_calendar.application import cell_presenter as cp
+from desktop_calendar.application.cell_presenter import (
+    CELL_NORMAL, CELL_MEMORIAL, CELL_RED,
+)
 
 def _make_widget(memorials=None):
     return cw.LunarCalendarWidget(None, DEFAULT_THEME, memorials or [])
@@ -33,9 +36,9 @@ def test_build_memorial_index(qapp):
         {"name": "禁用", "enabled": False},
     ])
 
-    assert w._memorial_index["solar_year"][(1, 1)][0]["name"] == "元旦"
-    assert w._memorial_index["solar_week"][1][0]["name"] == "周一"
-    assert w._memorial_index["lunar_year"][(1, 1, False)][0]["name"] == "农历"
+    assert w._presenter._memorial_index["solar_year"][(1, 1)][0]["name"] == "元旦"
+    assert w._presenter._memorial_index["solar_week"][1][0]["name"] == "周一"
+    assert w._presenter._memorial_index["lunar_year"][(1, 1, False)][0]["name"] == "农历"
 
 
 # ---------- 格子文本 ----------
@@ -47,11 +50,11 @@ def test_get_lunar_cell_text_solar_memorial(qapp):
     ])
     text, kind = w.get_lunar_cell_text(QDate(2025, 1, 1))
     assert text == "元旦"
-    assert kind == cw._CELL_MEMORIAL
+    assert kind == CELL_MEMORIAL
 
 
 def test_legal_holiday_name_map_red(qapp, monkeypatch):
-    monkeypatch.setattr(cw.lunar_mod, "HAS_CNLUNAR", True)
+    monkeypatch.setattr(cp.lunar_mod, "HAS_CNLUNAR", True)
     w = _make_widget([])
     text, kind = w.get_lunar_cell_text(
         QDate(2025, 1, 1),
@@ -59,11 +62,11 @@ def test_legal_holiday_name_map_red(qapp, monkeypatch):
         legal_raw="元旦节",
     )
     assert text == "元旦"
-    assert kind == cw._CELL_RED
+    assert kind == CELL_RED
 
 
 def test_lunar_festival_red(qapp, monkeypatch):
-    monkeypatch.setattr(cw.lunar_mod, "HAS_CNLUNAR", True)
+    monkeypatch.setattr(cp.lunar_mod, "HAS_CNLUNAR", True)
 
     class L:
         lunarMonth = 1
@@ -78,11 +81,11 @@ def test_lunar_festival_red(qapp, monkeypatch):
     text, kind = w.get_lunar_cell_text(
         QDate(2025, 1, 29), lunar=L(), legal_raw=None)
     assert text == "春节"
-    assert kind == cw._CELL_RED
+    assert kind == CELL_RED
 
 
 def test_chuxi_red(qapp, monkeypatch):
-    monkeypatch.setattr(cw.lunar_mod, "HAS_CNLUNAR", True)
+    monkeypatch.setattr(cp.lunar_mod, "HAS_CNLUNAR", True)
 
     class L12:
         lunarMonth = 12
@@ -99,11 +102,11 @@ def test_chuxi_red(qapp, monkeypatch):
         isLunarLeapMonth = False
 
     w = _make_widget([])
-    monkeypatch.setattr(w, "get_day_lunar_obj", lambda qd: L1())
+    monkeypatch.setattr(w._presenter, "_get_lunar", lambda qd: L1())
     text, kind = w.get_lunar_cell_text(
         QDate(2025, 1, 28), lunar=L12(), legal_raw=None)
     assert text == "除夕"
-    assert kind == cw._CELL_RED
+    assert kind == CELL_RED
 
 
 # ---------- 对外查询接口 ----------
@@ -143,21 +146,21 @@ def test_set_net_holiday_does_not_raise(qapp):
     
 def test_solar_festival_shown_without_cnlunar(qapp, monkeypatch):
     """无 cnlunar 时公历节日仍应显示（回归保护）。"""
-    monkeypatch.setattr(cw.lunar_mod, "HAS_CNLUNAR", False)
+    monkeypatch.setattr(cp.lunar_mod, "HAS_CNLUNAR", False)
     w = _make_widget([])
     text, kind = w.get_lunar_cell_text(QDate(2025, 1, 1))
     assert text == "元旦"
-    assert kind == cw._CELL_NORMAL
+    assert kind == CELL_NORMAL
 
 
 def test_lunar_obj_failure_falls_back_to_solar_festival(qapp, monkeypatch):
     """有 cnlunar 但取不到 lunar 对象时，公历节日兜底。"""
-    monkeypatch.setattr(cw.lunar_mod, "HAS_CNLUNAR", True)
+    monkeypatch.setattr(cp.lunar_mod, "HAS_CNLUNAR", True)
     w = _make_widget([])
-    monkeypatch.setattr(w, "get_day_lunar_obj", lambda qd: None)
+    monkeypatch.setattr(w._presenter, "_get_lunar", lambda qd: None)
     text, kind = w.get_lunar_cell_text(QDate(2025, 1, 1))
     assert text == "元旦"
-    assert kind == cw._CELL_NORMAL
+    assert kind == CELL_NORMAL
     
 def test_solar_memorial_beats_builtin_festival(qapp):
     """同一天既有内置公历节日又有纪念日时，纪念日优先。"""
@@ -167,7 +170,7 @@ def test_solar_memorial_beats_builtin_festival(qapp):
     ])
     text, kind = w.get_lunar_cell_text(QDate(2025, 1, 1))
     assert text == "我的元旦"
-    assert kind == cw._CELL_MEMORIAL
+    assert kind == CELL_MEMORIAL
     
 def test_calc_cell_data_returns_real_data(qapp):
     """回归保护：_calc_cell_data 必须返回非空 lunar_text。
@@ -182,6 +185,6 @@ def test_calc_cell_data_returns_real_data(qapp):
         {"name": "元旦", "type": "solar", "repeat_type": "year",
          "month": 1, "day": 1, "enabled": True},
     ])
-    cell = w._calc_cell_data(QDate(2025, 1, 1))
-    assert cell["lunar_text"] == "元旦"
-    assert cell["kind"] == cw._CELL_MEMORIAL
+    cell = w._presenter.compute(QDate(2025, 1, 1))
+    assert cell.lunar_text == "元旦"
+    assert cell.kind == CELL_MEMORIAL

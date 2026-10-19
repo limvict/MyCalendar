@@ -4,9 +4,9 @@ from typing import Optional
 from datetime import datetime
 from PyQt6.QtCore import QObject, QTimer, QDate, QTime
 from desktop_calendar.config.config import ConfigManager, get_logger
-from desktop_calendar.config.constants import DEFAULT_THEME
 from desktop_calendar.core.memorial import normalize_memorial, get_next_memorial_date
-from desktop_calendar.ui.dialogs import MemorialRemindDialog
+from desktop_calendar.contracts.event_bus import event_bus
+from desktop_calendar.contracts.events import EventType
 from desktop_calendar.config.i18n import tr
 
 logger = get_logger()
@@ -36,6 +36,7 @@ class ReminderManager(QObject):
         self._remind_timer.setSingleShot(True)
         self._remind_timer.timeout.connect(self._on_trigger)
         self._is_scheduling = False  # 防重入（仅保护非 force 路径）
+        self._pending_remind_date = ""
 
     # ------------------------------------------------------------------ #
     # 配置读取
@@ -343,28 +344,18 @@ class ReminderManager(QObject):
                 f"命中 {len(hit_list)} 条")
 
             if hit_list:
-                theme = self.config.get("theme", DEFAULT_THEME) or DEFAULT_THEME
-                # 先构造弹窗：构造失败（如主题缺字段、Qt 异常）不应
-                # 消耗当天的提醒配额，让下一次调度能重试。
-                try:
-                    dlg = MemorialRemindDialog(hit_list, theme, self.parent)
-                except Exception:
-                    logger.exception(
-                        "[提醒调试] 构造提醒弹窗失败，保留当日提醒配额")
+                # 已有待确认的提醒：不重复弹、不重复播声音。
+                if self._pending_remind_date:
+                    logger.debug(
+                        "[提醒调试] 已有待确认提醒 %s，跳过本次触发",
+                        self._pending_remind_date)
                     return
 
-                # 弹窗构造成功 → 落盘标记。取舍：若 exec 期间进程被强杀，
-                # 标记已落盘、下次启动不重复弹；代价是弹窗异常时当天也
-                # 不再提醒（可从日志感知）。反向做法在用户 kill 进程时
-                # 会重弹，体验上比"漏弹一次"更糟，故不采用。
-                self.config.set_nested(
-                    "memorial_cfg", "last_remind_date", today_str, save=False)
-                _flush_t0 = time.monotonic()
-                self.config.flush()
-                _flush_ms = (time.monotonic() - _flush_t0) * 1000
-                if _flush_ms > 50:
-                    logger.warning(f"[提醒调试] last_remind_date 落盘耗时 {_flush_ms:.1f}ms")
-                logger.debug(f"[提醒调试] 已标记今日 {today_str} 为已提醒，落盘 {_flush_ms:.1f}ms")
+                # 先置 pending 再异步 publish：
+                #  - 置 pending 挡住 publish 排队期间的再次进入；
+                #  - QTimer.singleShot 让 check_memorial 快速返回，
+                #    不在 exec 的嵌套事件循环里卡住 reschedule。
+                self._pending_remind_date = today_str
 
                 sound_enable = self._get_bool_cfg(
                     self.config, "memorial_cfg", "sound_enable",
@@ -372,8 +363,14 @@ class ReminderManager(QObject):
                 if sound_enable and self.sound_mgr:
                     self.sound_mgr.play("assets/alert.wav")
 
-                dlg.exec()
-                dlg.deleteLater()
+                logger.debug(
+                    "[提醒调试] 发布 MEMORIAL_REMIND_TRIGGERED，命中 %d 条",
+                    len(hit_list))
+                QTimer.singleShot(0, lambda: event_bus.publish(
+                    EventType.MEMORIAL_REMIND_TRIGGERED,
+                    hit_list=list(hit_list),
+                    today_str=today_str,
+                ))
             else:
                 logger.debug("[提醒调试] 无命中提醒")
         finally:
@@ -382,3 +379,31 @@ class ReminderManager(QObject):
                 self.reschedule(check_today=False, normalized=all_mem)
             except Exception:
                 logger.exception("[提醒调试] check_memorial 后重排失败")
+                
+    def acknowledge_reminder(self, today_str: str) -> None:
+        """
+        由 presentation 在提醒弹窗关闭后调用，落盘 last_remind_date。
+
+        :param today_str: 事件 payload 里的 today_str；与 pending 不一致
+            时直接忽略（防止过期确认覆盖新状态）。
+        """
+        if not today_str or today_str != self._pending_remind_date:
+            logger.debug(
+                "[提醒调试] acknowledge 忽略：today=%r pending=%r",
+                today_str, self._pending_remind_date)
+            return
+        self._pending_remind_date = ""
+        try:
+            self.config.set_nested(
+                "memorial_cfg", "last_remind_date", today_str, save=False)
+            t0 = time.monotonic()
+            self.config.flush()
+            ms = (time.monotonic() - t0) * 1000
+            if ms > 50:
+                logger.warning(
+                    "[提醒调试] last_remind_date 落盘耗时 %.1fms", ms)
+            logger.debug(
+                "[提醒调试] 用户已确认，标记 %s 为已提醒（落盘 %.1fms）",
+                today_str, ms)
+        except Exception:
+            logger.exception("[提醒调试] 写入 last_remind_date 失败")

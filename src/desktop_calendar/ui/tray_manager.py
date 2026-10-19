@@ -4,7 +4,8 @@ from PyQt6.QtCore import QObject
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QStyle, QApplication
 from desktop_calendar.config.config import ConfigManager, get_logger
-from desktop_calendar.services.event_bus import event_bus, EventType
+from desktop_calendar.contracts.event_bus import event_bus
+from desktop_calendar.contracts.events import EventType
 from desktop_calendar.config.i18n import tr
 
 logger = get_logger()

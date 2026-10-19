@@ -11,7 +11,7 @@ from desktop_calendar.ui.dialogs.base import (
     make_button_box,
     retranslate_button_box,
 )
-
+pytestmark = pytest.mark.ui
 
 @pytest.fixture(autouse=True)
 def _reset_lang_and_listeners():

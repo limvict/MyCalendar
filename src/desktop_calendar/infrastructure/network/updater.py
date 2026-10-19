@@ -35,7 +35,8 @@ from urllib.error import URLError
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from desktop_calendar.config.config import get_logger, get_config_path, config
-from desktop_calendar.services.event_bus import event_bus, EventType
+from desktop_calendar.contracts.event_bus import event_bus
+from desktop_calendar.contracts.events import EventType
 
 logger = get_logger()
 
@@ -268,6 +269,7 @@ class UpdateDownloader(QThread):
         self._cancelled.set()
 
     # ---------- bat 脚本生成 ----------
+    @staticmethod
     def _build_bat_script() -> str:
         lines = [
             "@echo off",

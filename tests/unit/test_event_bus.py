@@ -1,6 +1,6 @@
 # coding: utf-8
 """EventBus 基础契约。"""
-from desktop_calendar.services.event_bus import EventBus
+from desktop_calendar.contracts.event_bus import EventBus
 
 
 def test_publish_subscribe(qapp):

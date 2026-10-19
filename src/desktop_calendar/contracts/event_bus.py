@@ -1,7 +1,9 @@
 # coding: utf-8
 import threading
 from typing import Callable, Any, Dict, List, Tuple
+
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QCoreApplication
+
 from desktop_calendar.config.config import get_logger
 
 logger = get_logger()
@@ -164,23 +166,5 @@ class _EventBusProxy:
     def clear_all(self):
         if self._impl is not None:
             self._impl.clear_all()
-
-
-class EventType:
-    HOLIDAY_UPDATED = "holiday_updated"
-    MEMORIAL_CHANGED = "memorial_changed"
-    WINDOW_SHOW = "window_show"
-    WINDOW_QUIT = "window_quit"
-    WINDOW_TOGGLE_TOPMOST = "window_toggle_topmost"
-    OPEN_SETTINGS = "open_settings"
-    SETTINGS_CHANGED = "settings_changed"
-    BACKUP_MEMORIAL = "backup_memorial"
-    RESTORE_MEMORIAL = "restore_memorial"
-    # 自动更新
-    UPDATE_AVAILABLE = "update_available"   # payload: info=dict
-    UPDATE_FAILED    = "update_failed"      # payload: stage=str, error=str
-    UPDATE_READY     = "update_ready"       # 无 payload，订阅方应退出主程序
-    UPDATE_PROGRESS  = "update_progress"    # payload: percent=int (0-100)
-
 
 event_bus = _EventBusProxy()

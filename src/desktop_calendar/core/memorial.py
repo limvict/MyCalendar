@@ -5,7 +5,6 @@
 import calendar
 from datetime import date, datetime, timedelta
 from typing import Optional
-from desktop_calendar.config.i18n import tr
 from desktop_calendar.config.config import get_logger
 from desktop_calendar.config.constants import REFERENCE_LEAP_YEAR, to_bool
 from desktop_calendar.core import lunar as lunar_mod
@@ -57,7 +56,7 @@ def _to_pydate(qdate) -> date:
 def normalize_memorial(mem: dict) -> dict:
     mem = mem.copy()
     defaults = {
-        "name": tr("memorial.default_name"),
+        "name": "",          
         "type": "solar",
         "month": 1,
         "day": 1,

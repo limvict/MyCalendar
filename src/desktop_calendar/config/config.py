@@ -38,9 +38,19 @@ def _get_log_dir() -> str:
     return override or os.path.join(_get_base_dir(), "MyCalendarApp")
 
 def get_resource_path(relative_path: str) -> str:
-    """获取资源文件路径（兼容打包后环境）。"""
-    base_path = getattr(sys, "_MEIPASS", None) or os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+    """获取资源文件路径（兼容打包后环境）。
+
+    打包后：_MEIPASS 根。
+    源码运行：项目根（main.py 所在目录），而不是 CWD ——
+    否则从任意目录 `python -m` 启动都找不到资源。
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return os.path.join(meipass, relative_path)
+    project_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # src/desktop_calendar/config/config.py → 上三级 = 项目根
+    return os.path.join(project_root, relative_path)
 
 def _get_app_data_dir() -> str:
     data_dir = os.path.join(_get_base_dir(), "MyCalendarApp")
@@ -403,11 +413,13 @@ class ConfigManager:
 
     def _flush_save(self):
         with self._flush_lock:
-            current_thread = threading.current_thread()
             try:
                 cfg_path = get_config_path()
                 with self._lock:
-                    if self._save_timer is current_thread:
+                    # Timer 已结束，清引用；下次 save_debounced 重新创建。
+                    # 注意：这里不能用 is current_thread 判断——
+                    # _save_timer 是 threading.Timer，不是 Thread。
+                    if self._save_timer is not None:
                         self._save_timer = None
                     data = copy.deepcopy(self._cfg)
                     snapshot_ts = time.monotonic()

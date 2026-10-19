@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QMessageBox
 
 from desktop_calendar.ui.dialogs import AddMemorialDialog
 from desktop_calendar.core.memorial import REPEAT_WEEK, REPEAT_YEAR
-
+pytestmark = pytest.mark.ui
 # ---------- helpers ----------
 
 def _select_repeat(dlg, repeat_type):

@@ -7,8 +7,9 @@ import sys
 
 import pytest
 
-from desktop_calendar.app import auto_start
+from desktop_calendar.infrastructure.platform import auto_start
 
+pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def clean_meipass(monkeypatch):

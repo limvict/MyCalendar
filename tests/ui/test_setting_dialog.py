@@ -9,7 +9,8 @@ import json
 from PyQt6.QtWidgets import QFileDialog
 
 from desktop_calendar.ui.dialogs import SettingDialog
-
+import pytest
+pytestmark = pytest.mark.ui
 
 def _make_dlg(cfg=None):
     return SettingDialog(

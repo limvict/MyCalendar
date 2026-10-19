@@ -1,8 +1,8 @@
 # coding: utf-8
 from datetime import datetime
-
+from PyQt6.QtCore import QDate
 from desktop_calendar.core import holiday_manager as hm_mod
-
+from desktop_calendar.core.holiday_manager import HolidayManager
 
 class _BareHM(hm_mod.HolidayManager):
     """跳过 __init__：直接注入 holiday_cache 测 apply_cached。"""
@@ -10,6 +10,49 @@ class _BareHM(hm_mod.HolidayManager):
     def __init__(self):
         self.holiday_cache = {}
       
+class FakeHolidaySource:
+    def __init__(self, *, on_ready, on_error, parent=None):
+        self.on_ready = on_ready
+        self.on_error = on_error
+        self.started = False
+        self.requests = []
+        self.shutdown_called = False
+        self.shutdown_result = True
+
+    def start(self):
+        self.started = True
+        return True
+
+    def request(self, year):
+        self.requests.append(year)
+
+    def shutdown(self, timeout_ms=3000):
+        self.shutdown_called = True
+        return self.shutdown_result
+
+
+def make_manager(config):
+    return HolidayManager(config, source_factory=FakeHolidaySource)
+
+
+def test_request_current_year(config, monkeypatch):
+    mgr = make_manager(config)
+    src = mgr._source
+    assert src.started
+    monkeypatch.setattr(
+        "desktop_calendar.core.holiday_manager.QDate.currentDate",
+        lambda: QDate(2024, 12, 31),
+    )
+    mgr.fetch_current_year()
+    assert src.requests == [2024, 2025]
+
+
+def test_shutdown_idempotent(config):
+    mgr = make_manager(config)
+    src = mgr._source
+    mgr.shutdown()
+    mgr.shutdown()  # 第二次不抛异常
+    assert src.shutdown_called
 
 def test_apply_cached_removes_expired(monkeypatch):
     obj = _BareHM()

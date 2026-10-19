@@ -299,9 +299,9 @@ class SettingDialog(RetranslatableDialog, QDialog):
         self.chk_mem_remind.setText(tr("setting.memorial_remind"))
         self.chk_mem_sound.setText(tr("setting.memorial_sound"))
         self.lbl_op.setText(tr("setting.opacity"))
-        self.btn_export.setText(tr("btn.export"))
-        self.btn_import.setText(tr("btn.import"))
-        self.btn_mem.setText(tr("btn.manage_memorial"))
+        self.btn_export.setText(tr("setting.export"))
+        self.btn_import.setText(tr("setting.import"))
+        self.btn_mem.setText(tr("setting.manage_memorial"))
         retranslate_button_box(self._btn_box)
 
     def open_mem_dialog(self):

@@ -3,7 +3,7 @@
 import pytest
 
 from desktop_calendar.ui import info_panel
-
+pytestmark = pytest.mark.ui
 
 class _FakeLunar:
     """最小化 mock：只提供 info_panel 读取的属性。"""

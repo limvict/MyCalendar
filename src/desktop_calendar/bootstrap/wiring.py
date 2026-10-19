@@ -6,7 +6,8 @@
 回调通过 bound method 从 window 上取，本模块不 import main_window，
 避免循环依赖。
 """
-from desktop_calendar.services.event_bus import event_bus, EventType
+from desktop_calendar.contracts.event_bus import event_bus
+from desktop_calendar.contracts.events import EventType
 from desktop_calendar.config.config import get_logger
 
 logger = get_logger()
@@ -17,6 +18,7 @@ def _subscriptions(window):
     return [
         (EventType.HOLIDAY_UPDATED,       window._on_holiday_updated),
         (EventType.MEMORIAL_CHANGED,      window._on_memorial_changed),
+        (EventType.MEMORIAL_REMIND_TRIGGERED, window._on_memorial_remind_triggered),
         (EventType.WINDOW_SHOW,           window._on_window_show),
         (EventType.WINDOW_QUIT,           window._on_window_quit),
         (EventType.WINDOW_TOGGLE_TOPMOST, window._on_toggle_topmost),

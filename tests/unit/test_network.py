@@ -1,9 +1,9 @@
 # coding: utf-8
 import pytest
 
-from desktop_calendar.services.network import HolidayNetWorker
-
-
+from desktop_calendar.infrastructure.network.holiday_worker import (
+    HolidayNetWorker,
+)
 def test_parse_holiday_json_holiday_cn():
     raw = """
     {

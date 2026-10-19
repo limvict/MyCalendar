@@ -1,14 +1,42 @@
-[build-system]
-requires = ["setuptools>=61"]
-build-backend = "setuptools.build_meta"
+[tool.importlinter]
+root_package = "desktop_calendar"
 
-[project]
-name = "desktop-calendar"
-version = "3.0.4"
-requires-python = ">=3.10"
+[[tool.importlinter.contracts]]
+name = "分层依赖（自上而下）"
+type = "layers"
+layers = [
+    "desktop_calendar.bootstrap",
+    "desktop_calendar.ui",
+    "desktop_calendar.application",
+    "desktop_calendar.core | desktop_calendar.infrastructure",
+    "desktop_calendar.contracts",
+    "desktop_calendar.config",
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[[tool.importlinter.contracts]]
+name = "holiday_manager 不得依赖 Qt 网络实现"
+type = "forbidden"
+source_modules = ["desktop_calendar.core.holiday_manager"]
+forbidden_modules = ["desktop_calendar.infrastructure.network"]
 
-[tool.setuptools.package-data]
-"desktop_calendar.config" = ["*.json"]
+[[tool.importlinter.contracts]]
+name = "contracts.events 必须零依赖"
+type = "forbidden"
+source_modules = ["desktop_calendar.contracts.events"]
+forbidden_modules = ["desktop_calendar"]
+
+[[tool.importlinter.contracts]]
+name = "core.memorial 不得依赖 i18n"
+type = "forbidden"
+source_modules = ["desktop_calendar.core.memorial"]
+forbidden_modules = ["desktop_calendar.config.i18n"]
+
+[[tool.importlinter.contracts]]
+name = "ui.calendar_widget 不得直接依赖 core 业务模块"
+type = "forbidden"
+source_modules = ["desktop_calendar.ui.calendar_widget"]
+forbidden_modules = [
+    "desktop_calendar.core.lunar",
+    "desktop_calendar.core.memorial",
+]
+allow_indirect_imports = true

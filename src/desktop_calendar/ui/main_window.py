@@ -13,38 +13,40 @@
 业务逻辑全部下沉到 manager / controller。本类方法超过 ~15 行
 通常说明有东西该抽出去。
 """
+from typing import Optional
+
 from PyQt6.QtCore import Qt, QTimer, QDate
-from PyQt6.QtGui import QColor,QKeySequence, QShortcut
+from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QPushButton, QMenu, QLabel,
     QGraphicsDropShadowEffect, QMessageBox, QProgressDialog,
 )
-from typing import Optional
-from desktop_calendar.core import lunar as lunar_mod
+
+from desktop_calendar.config.config import config, get_logger, get_resource_path
 from desktop_calendar.config.i18n import (
     set_language, tr, on_language_changed, off_language_changed,
 )
-from desktop_calendar.config.config import config, get_logger, get_resource_path
-from desktop_calendar.utils.helpers import init_config_defaults
-from desktop_calendar.ui.calendar_widget import ClickLabel, LunarCalendarWidget
-from desktop_calendar.ui.dialogs import MonthYearPickerDialog
-from desktop_calendar.services.sound_manager import SoundManager
-from desktop_calendar.services.window_state_manager import WindowStateManager
+from desktop_calendar.core import lunar as lunar_mod
 from desktop_calendar.core.holiday_manager import HolidayManager
-from desktop_calendar.core.memorial_data_manager import MemorialDataManager
-from desktop_calendar.ui.tray_manager import TrayManager
-from desktop_calendar.ui.style_manager import StyleManager
-from desktop_calendar.core.reminder_manager import ReminderManager
 from desktop_calendar.core.lunar import get_lunar_by_datetime
-from desktop_calendar.services.updater import UpdateManager
-
-from desktop_calendar.ui.dialogs import msg_error
-from desktop_calendar.ui import dwm
+from desktop_calendar.core.reminder_manager import ReminderManager
+from desktop_calendar.infrastructure.audio import SoundManager
+from desktop_calendar.infrastructure.network.qt_holiday_source import QtHolidaySource
+from desktop_calendar.infrastructure.network.updater import UpdateManager
+from desktop_calendar.infrastructure.platform import dwm
 from desktop_calendar.ui import info_panel
-from desktop_calendar.app import event_wiring
-from desktop_calendar.app import settings_controller
-from desktop_calendar.app.dependency_check import check_dependencies
+from desktop_calendar.ui.calendar_widget import ClickLabel, LunarCalendarWidget
+from desktop_calendar.ui.controllers import settings_controller
+from desktop_calendar.ui.controllers.dependency_check import check_dependencies
+from desktop_calendar.ui.controllers.memorial_data_manager import MemorialDataManager
+from desktop_calendar.ui.controllers.window_state import WindowStateManager
+from desktop_calendar.ui.dialogs import (
+    MonthYearPickerDialog, MemorialRemindDialog, msg_error,
+)
+from desktop_calendar.ui.style_manager import StyleManager
+from desktop_calendar.ui.tray_manager import TrayManager
+from desktop_calendar.utils.helpers import init_config_defaults
 
 logger = get_logger()
 
@@ -52,7 +54,7 @@ logger = get_logger()
 class MainWindow(QWidget):
     """UI 容器：只做布局装配与事件转发，业务逻辑在 manager / controller。"""
 
-    def __init__(self):
+    def __init__(self, wiring=None):
         super().__init__()
         # 幂等退出守卫：托盘退出 / closeEvent / UPDATE_READY 可能重复触发
         self._quitting = False
@@ -65,7 +67,7 @@ class MainWindow(QWidget):
         self.style_mgr = StyleManager(config)
         self.sound_mgr = SoundManager(self, get_resource_path)
         self.window_state = WindowStateManager(self, config)
-        self.holiday_mgr = HolidayManager(config)
+        self.holiday_mgr = HolidayManager(config, source_factory=QtHolidaySource)
         self.memorial_mgr = MemorialDataManager(self, config)
         self.reminder_mgr = ReminderManager(self, config, self.sound_mgr)
         self.tray_mgr = TrayManager(self, config, get_resource_path)
@@ -75,7 +77,9 @@ class MainWindow(QWidget):
         self._setup_window()
         self.build_ui()
         self.style_mgr.refresh_all(self)
-        event_wiring.connect(self)
+        self._wiring = wiring
+        if wiring is not None:
+            wiring.connect(self)
 
         self._lang_cb = self._on_language_changed
         on_language_changed(self._lang_cb)
@@ -247,6 +251,28 @@ class MainWindow(QWidget):
                        and bool(data.get("check_today", False)))
         self.reminder_mgr.reschedule(force=True, check_today=check_today)
 
+    def _on_memorial_remind_triggered(self, data: dict = None):
+        """提醒到点：由 presentation 负责弹窗，关闭后回写确认。"""
+        if not isinstance(data, dict):
+            return
+        hit_list = data.get("hit_list") or []
+        today_str = data.get("today_str") or ""
+        if not hit_list or not today_str:
+            logger.warning(
+                "MEMORIAL_REMIND_TRIGGERED 收到非法 payload: %r", data)
+            return
+        try:
+            dlg = MemorialRemindDialog(
+                hit_list, self.style_mgr.current_theme, self)
+            dlg.exec()
+            dlg.deleteLater()
+        except Exception:
+            logger.exception("纪念日提醒弹窗异常，本次提醒放弃")
+            return
+        # 弹窗正常关闭（OK / Esc / 叉）均视为“用户已看到”，
+        # 只有构造/exec 抛异常才不确认 —— 与用户选择一致。
+        self.reminder_mgr.acknowledge_reminder(today_str)
+    
     def _on_toggle_topmost(self, data=None):
         if not isinstance(data, dict) or "enable" not in data:
             logger.warning("WINDOW_TOGGLE_TOPMOST 收到非法 payload: %r", data)
@@ -624,9 +650,9 @@ class MainWindow(QWidget):
             self._close_update_progress()
         except Exception:
             pass
-
         try:
-            event_wiring.disconnect(self)
+            if self._wiring is not None:
+                self._wiring.disconnect(self)
         except Exception as e:
             logger.warning("解除事件订阅失败: %s", e, exc_info=True)
         try:

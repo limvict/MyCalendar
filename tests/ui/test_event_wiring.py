@@ -2,9 +2,9 @@
 """event_wiring 订阅/退订对称性单测。"""
 import pytest
 
-from desktop_calendar.services.event_bus import event_bus, EventType
-from desktop_calendar.app import event_wiring
-
+from desktop_calendar.contracts.event_bus import event_bus
+from desktop_calendar.bootstrap import wiring as event_wiring
+pytestmark = pytest.mark.ui
 
 class _StubWindow:
     """只提供 _subscriptions 里用到的回调属性。"""
@@ -13,6 +13,7 @@ class _StubWindow:
         # 每个回调都返回一个稳定可调用的 bound method
         for name in (
             "_on_holiday_updated", "_on_memorial_changed",
+            "_on_memorial_remind_triggered",
             "_on_window_show", "_on_window_quit", "_on_toggle_topmost",
             "_on_open_settings", "_on_backup_memorial",
             "_on_restore_memorial",
@@ -32,7 +33,6 @@ def _reset_bus():
 def test_connect_then_disconnect_is_symmetric():
     w = _StubWindow()
     event_wiring.connect(w)
-    # 通过私有 _subscriber_map 检查（唯一可靠的原子化观测点）
     impl = event_bus._ensure()
     assert impl._subscriber_map, "connect 后订阅表不应为空"
 
@@ -45,6 +45,5 @@ def test_double_connect_is_idempotent():
     event_wiring.connect(w)
     event_wiring.connect(w)
     impl = event_bus._ensure()
-    # 每个 event_type 下每个 slot 最多一条
     for entries in impl._subscriber_map.values():
         assert len(entries) == 1
