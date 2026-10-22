@@ -147,7 +147,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     patch(
-        ROOT / "src" / "desktop_calendar" / "services" / "updater.py",
+        ROOT / "src" / "desktop_calendar" / "infrastructure" / "network" / "updater.py",
         r'CURRENT_VERSION\s*=\s*"[^"]*"',
         f'CURRENT_VERSION = "{ver}"',
         "CURRENT_VERSION",

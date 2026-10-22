@@ -60,7 +60,7 @@ def collect_pyproject() -> None:
 
 
 def collect_updater() -> None:
-    path = ROOT / "src" / "desktop_calendar" / "services" / "updater.py"
+    path = ROOT / "src" / "desktop_calendar" / "infrastructure" / "network" / "updater.py"
     if not path.exists():
         errors.append(f"missing: {path.relative_to(ROOT)}")
         return

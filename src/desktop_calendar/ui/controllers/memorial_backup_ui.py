@@ -5,13 +5,14 @@ import json
 from PyQt6.QtCore import QObject
 from PyQt6.QtWidgets import QFileDialog
 
-from desktop_calendar.application.memorial_backup import backup_to, restore_from
 from desktop_calendar.contracts.event_bus import event_bus
 from desktop_calendar.contracts.events import EventType
 from desktop_calendar.ui.dialogs import msg_info, msg_error
 from desktop_calendar.config.i18n import tr
-from desktop_calendar.config.config import ConfigManager, get_logger
-
+from desktop_calendar.config.manager import ConfigManager, get_logger
+from desktop_calendar.core.memorial_backup import (
+    backup_to, restore_from, BackupFormatError,
+)
 logger = get_logger()
 
 
@@ -48,13 +49,21 @@ class MemorialDataManager(QObject):
             return
         try:
             count, skipped = restore_from(path, self.config)
-        except ValueError:
-            msg_error(self.parent, tr("msg.error"),
-                      tr("backup.format_error"))
-            return
         except json.JSONDecodeError as e:
             msg_error(self.parent, tr("msg.error"),
                       tr("backup.read_failed").format(error=e))
+            return
+        except UnicodeDecodeError as e:
+            # 非 UTF-8 备份（老版记事本存 GBK 等）。
+            # 必须早于 BackupFormatError/ValueError：UnicodeDecodeError
+            # 是 ValueError 子类，晚捕获会被误报为"格式错误"。
+            msg_error(self.parent, tr("msg.error"),
+                      tr("backup.read_failed").format(error=e))
+            return
+        except BackupFormatError:
+            # 精确匹配：JSON 合法但结构不对
+            msg_error(self.parent, tr("msg.error"),
+                      tr("backup.format_error"))
             return
         except Exception as e:
             logger.error("恢复纪念日失败: %s", e)

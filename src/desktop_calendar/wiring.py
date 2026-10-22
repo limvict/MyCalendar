@@ -8,7 +8,7 @@
 """
 from desktop_calendar.contracts.event_bus import event_bus
 from desktop_calendar.contracts.events import EventType
-from desktop_calendar.config.config import get_logger
+from desktop_calendar.config.manager import get_logger
 
 logger = get_logger()
 
@@ -38,15 +38,10 @@ def connect(window) -> None:
             event_bus.subscribe(evt, cb)
         except Exception as e:
             logger.warning("订阅 %s 失败: %s", evt, e)
-
-
+            
 def disconnect(window) -> None:
-    """
-    退出时主动解除事件订阅，避免闭包/引用悬挂到解释器退出。
-    逐条 try：某条失败不影响其余清理。
-    """
     for evt, cb in _subscriptions(window):
         try:
             event_bus.unsubscribe(evt, cb)
         except Exception as e:
-            logger.warning("订阅 %s 失败: %s", evt, e)
+            logger.warning("退订 %s 失败: %s", evt, e)

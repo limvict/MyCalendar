@@ -1,3 +1,9 @@
+[project]
+name = "desktop-calendar"
+version = "3.0.4"
+description = "桌面日历（DesktopCalendar）"
+requires-python = ">=3.10"
+
 [tool.importlinter]
 root_package = "desktop_calendar"
 

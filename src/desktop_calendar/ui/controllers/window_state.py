@@ -1,8 +1,7 @@
 # coding: utf-8
 from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QWidget, QApplication
-from desktop_calendar.config.config import ConfigManager
+from desktop_calendar.config.manager import ConfigManager
 
 
 class WindowStateManager:
@@ -41,18 +40,13 @@ class WindowStateManager:
         geo = (self.window.saveGeometry()
            if (was_visible and not was_minimized) else None)
         self.window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enable)
-        if  was_visible:
+        if was_visible:
             if was_minimized:
                 self.window.showMinimized()
             else:
                 self.window.show()
             if geo is not None:
                 self.window.restoreGeometry(geo)
-
-    def toggle_topmost(self):
-        current = self.config.get("topmost", False)
-        self.set_topmost(not current)
-        self.config.set("topmost", not current, save=True)
 
     def mouse_press_event(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

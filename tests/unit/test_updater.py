@@ -198,16 +198,12 @@ def test_build_bat_polls_pid_then_moves(qapp):
 
 
 def test_build_bat_env_keys_consistent():
-    """Python 侧写入的每个 env key 都必须在 bat 里被消费。
-
-    与 run() 里 env.update({...}) 的键集保持同步：新增键时如果忘了
-    在 bat 里用，此测试会失败。DLC_PROBE 是已废弃的死变量。
-    """
+    """Python 侧写入的每个 env key 都必须在 bat 里被消费。"""
     bat = UpdateDownloader._build_bat_script()
     for key in ("DLC_PID", "DLC_EXE", "DLC_NEW", "DLC_OLD",
-                "DLC_LOG", "DLC_WAIT"):
+                "DLC_LOG", "DLC_WAIT", "DLC_PROBE", "DLC_STATE",
+                "DLC_VERSION"):
         assert f"%{key}%" in bat, f"{key} 在 bat 脚本中未被使用"
-    assert "%DLC_PROBE%" not in bat, "DLC_PROBE 已废弃，不应再出现"
 
 
 def test_build_bat_self_deletes(qapp):
@@ -238,11 +234,10 @@ def test_build_bat_uses_crlf(qapp):
 
 
 def _rollback_block(bat: str) -> str:
-    """切出 :rollback ... :cleanup 之间的文本。"""
-    start = bat.index(":rollback")
+    """切出 :do_rollback ... :cleanup 之间的文本。"""
+    start = bat.index(":do_rollback")
     end = bat.index(":cleanup", start)
     return bat[start:end]
-
 
 def test_build_bat_rollback_checks_move_errorlevel(qapp):
     """回滚 move 失败时不能 start 一个不存在/损坏的 exe。
@@ -633,3 +628,36 @@ def test_on_downloaded_success_publishes_update_ready(qapp, fake_bus):
     assert evt == EventType.UPDATE_READY
     # UPDATE_READY 无 payload
     assert kw == {}
+    
+def test_pending_failure_close_button_does_not_retry(qtbot, monkeypatch):
+    """点叉（NoButton）不应被当作重试。"""
+    from PyQt6.QtWidgets import QMessageBox
+    from desktop_calendar.ui.controllers.update_ui import UpdateUIController
+
+    class _StubMgr:
+        def consume_pending_failure(self):
+            return {"version": "3.1.0", "reason": "install_failed",
+                    "log_path": "/tmp/x.log"}
+
+    ctrl = UpdateUIController(None, _StubMgr(), lambda: None)
+
+    # 让 QMessageBox.exec 返回 NoButton（点叉的实际返回值）
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.NoButton)
+    assert ctrl._handle_pending_failure() == ""
+
+
+def test_pending_failure_retry_returns_version(qtbot, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from desktop_calendar.ui.controllers.update_ui import UpdateUIController
+
+    class _StubMgr:
+        def consume_pending_failure(self):
+            return {"version": "3.1.0", "reason": "install_failed",
+                    "log_path": "/tmp/x.log"}
+
+    ctrl = UpdateUIController(None, _StubMgr(), lambda: None)
+    monkeypatch.setattr(
+        QMessageBox, "exec",
+        lambda self: QMessageBox.StandardButton.Retry,
+    )
+    assert ctrl._handle_pending_failure() == "3.1.0"

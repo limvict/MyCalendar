@@ -4,8 +4,8 @@ from PyQt6.QtCore import QDate
 
 from desktop_calendar.ui import calendar_widget as cw
 from desktop_calendar.config.constants import DEFAULT_THEME
-from desktop_calendar.application import cell_presenter as cp
-from desktop_calendar.application.cell_presenter import (
+from desktop_calendar.ui import cell_presenter as cp
+from desktop_calendar.ui.cell_presenter import (
     CELL_NORMAL, CELL_MEMORIAL, CELL_RED,
 )
 

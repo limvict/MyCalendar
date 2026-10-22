@@ -9,6 +9,10 @@
 import os
 import sys
 import tempfile
+import pytest
+from PyQt6.QtWidgets import QApplication,QMessageBox
+from desktop_calendar.config import config as config_mod
+from desktop_calendar.utils import paths as paths_mod
 
 # --- Qt 离屏模式 ---
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -26,9 +30,6 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import pytest
-
-
 def pytest_sessionfinish(session, exitstatus):
     """整场跑完后清理临时目录。"""
     import shutil
@@ -37,8 +38,7 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(scope="session")
 def qapp():
-    from PyQt6.QtWidgets import QApplication
-
+    
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
@@ -48,7 +48,7 @@ def qapp():
 @pytest.fixture(autouse=True)
 def _kill_modals(monkeypatch):
     """封杀所有 QMessageBox 弹窗，避免 offscreen 下 .exec() 永久阻塞。"""
-    from PyQt6.QtWidgets import QMessageBox
+   
 
     NOOP = lambda *a, **k: None                      # noqa: E731
     YES = lambda *a, **k: QMessageBox.StandardButton.Yes
@@ -63,61 +63,73 @@ def _kill_modals(monkeypatch):
     monkeypatch.setattr(QMessageBox, "open", lambda self: None)
 
 
+# ---------- 修改 isolated_config ----------
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
-    """每个测试使用独立临时配置目录，并重置 ConfigManager 单例。"""
-    from desktop_calendar.config import config as config_mod
+    """每个测试使用独立临时配置目录，并重置 ConfigManager 单例。
 
-    monkeypatch.setattr(config_mod, "_get_base_dir", lambda: str(tmp_path))
-    monkeypatch.setattr(config_mod, "CONFIG_SAVE_DEBOUNCE_MS", 10)
+    yield 一个二元组 (config_mod, config_instance)：
+      - config_mod:    desktop_calendar.config.config 模块本身，
+                       用于 monkeypatch 模块级函数（get_config_path 等）
+      - config_instance: ConfigManager 单例，用于 crud 测试
+    """
+    monkeypatch.setattr(paths_mod, "get_base_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        config_mod, "_get_app_data_dir",
+        lambda: str(tmp_path / "MyCalendarApp"),
+    )
+    monkeypatch.setattr(config_mod.ConfigManager, "_instance", None)
 
-    config_mod.ConfigManager._instance = None
-    cm = config_mod.ConfigManager()
+    yield config_mod, config_mod.config
 
-    monkeypatch.setattr(config_mod, "config", cm)
 
-    yield config_mod, cm
+# ---------- 新增：单对象版本，给其他测试用 ----------
+@pytest.fixture
+def config_instance(isolated_config):
+    """只取 ConfigManager 实例的便捷 fixture。
 
-    try:
-        cm.flush()
-    except Exception:
-        pass
-    config_mod.ConfigManager._instance = None
-    
+    与 isolated_config 共享隔离逻辑，只是省略了 mod 部分。
+    历史代码若用 `config` fixture 拿单实例，推荐迁移到此。
+    """
+    _, cm = isolated_config
+    return cm
+
+# ---------- 保持 config 兼容：改为委托 config_instance ----------
+@pytest.fixture
+def config(config_instance):
+    """兼容历史测试：config 即 ConfigManager 实例的别名。
+
+    改自原 `config = isolated_config` —— 原先 isolated_config 返回
+    单对象，现在返回二元组，所以这里改为委托 config_instance。
+    """
+    return config_instance
 
 @pytest.fixture(autouse=True)
 def _some_fixture():
     from desktop_calendar.contracts.event_bus import event_bus
     from desktop_calendar.config import i18n
+    from desktop_calendar.config.translations import ZH_CN
 
+    # i18n 的 _current_lang / _current_table 是模块级 global，
+    # 测试间共享会让 set_language 提前 return（new_lang == _current_lang），
+    # 从而不通知监听者，造成"语言切换后 UI 没刷新"的假失败。
     event_bus.clear_all()
     i18n._listeners.clear()
+    i18n._current_lang = "zh_CN"
+    i18n._current_table = ZH_CN
     yield
     event_bus.clear_all()
     i18n._listeners.clear()
-    
-    
+    i18n._current_lang = "zh_CN"
+    i18n._current_table = ZH_CN
+
 # ---------- 共享测试替身 ----------
 
 @pytest.fixture
 def fake_lunar():
-    """构造假 cnlunar 对象的工厂。
-
-    用法：
-        lunar = fake_lunar(lunarYearCn="二〇二五年", ...)
-
-    属性挂 lambda 时不会被绑定 self —— 这是有意为之：
-    cnlunar 的 get_legalHolidays 是实例方法，mock 成 lambda 后
-    调用不带 self，与被测代码"直接调 lunar.get_legalHolidays()"
-    的语义一致。
-    """
+    """构造假 cnlunar 对象的工厂。"""
     class FakeLunar:
         def __init__(self, **attrs):
             for k, v in attrs.items():
                 setattr(self, k, v)
     return FakeLunar
-
-@pytest.fixture
-def config(isolated_config):
-    """兼容历史测试：config 即 isolated_config 的别名。"""
-    return isolated_config

@@ -40,35 +40,3 @@ def test_migrate_fixes_bad_types(isolated_config):
     assert isinstance(cm.get("memorial_cfg"), dict)
     assert cm.get("memorial_cfg")["enable_remind"] is True
 
-
-def test_init_config_defaults_tolerates_plain_object():
-    """传入无 _migrate / save_debounced 的对象时不应抛异常。"""
-    from desktop_calendar.utils import helpers as utils_mod
-
-    class Bare:
-        pass
-
-    utils_mod.init_config_defaults(Bare())   # 不抛即通过
-    utils_mod.init_config_defaults(None)     # None 也不抛
-
-
-def test_init_config_defaults_delegates_to_migrate(isolated_config):
-    """init_config_defaults 应委托 _migrate，两者补齐的字段必须一致。"""
-    from desktop_calendar.utils import helpers as utils_mod
-
-    mod, cm = isolated_config
-
-    # 绕过 replace_all（它会自动跑 _migrate），直接造"迁移前"状态
-    cm._cfg = {"memorial_cfg": {}}
-    utils_mod.init_config_defaults(cm)
-
-    assert cm.get("memorial_days") == []
-    assert cm.get("topmost") is False
-    assert cm.get("opacity") == 0.92
-    assert cm.get("theme") is None
-    assert cm.get("config_version") == mod.CONFIG_VERSION
-    assert cm.get("memorial_cfg")["enable_remind"] is True
-    assert cm.get("memorial_cfg")["remind_start_hour"] == 8
-    assert cm.get("memorial_cfg")["remind_end_hour"] == 22
-    assert cm.get("memorial_cfg")["sound_enable"] is True
-    assert cm.get("memorial_cfg")["last_remind_date"] == ""

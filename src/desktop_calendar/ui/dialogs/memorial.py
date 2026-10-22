@@ -13,23 +13,11 @@
 import copy
 import calendar
 from datetime import date
-
+from typing import Any, Optional
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QMessageBox,
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QCheckBox,
-    QSpinBox,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-    QComboBox,
-    QRadioButton,
-    QButtonGroup,
+from PyQt6.QtWidgets import (QMessageBox, QDialog, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QCheckBox, QSpinBox, QListWidget, QListWidgetItem,
+    QPushButton, QComboBox, QRadioButton, QButtonGroup,
 )
 
 from desktop_calendar.core.memorial import (
@@ -41,7 +29,7 @@ from desktop_calendar.core.memorial import (
 )
 from desktop_calendar.config.i18n import tr
 from desktop_calendar.config.constants import REFERENCE_LEAP_YEAR
-from desktop_calendar.config.config import get_logger
+from desktop_calendar.config.manager import get_logger
 
 from .messages import msg_info, msg_warn
 from .base import (
@@ -335,7 +323,7 @@ class AddMemorialDialog(RetranslatableDialog, QDialog):
         repeat_type = self.combo_repeat.currentData()
         if repeat_type == REPEAT_WEEK:
             typ = "solar"  # 每周重复强制公历
-        return {
+        raw = {
             "name": self.edit_name.text().strip(),
             "type": typ,
             "month": self.spin_month.value(),
@@ -345,6 +333,10 @@ class AddMemorialDialog(RetranslatableDialog, QDialog):
             "enabled": self.chk_enabled.isChecked(),
             "repeat_type": repeat_type,
         }
+        # 返回 normalize 后的数据：下游（MemorialDialog / settings_controller）
+        # 可信任字段已合法。get_data 只在 _on_accept 通过后调用，
+        # normalize 不会再改变用户输入的值。
+        return normalize_memorial(raw)
 
 
 # ===================== 纪念日管理弹窗 =====================
@@ -415,10 +407,23 @@ class MemorialDialog(RetranslatableDialog, QDialog):
         self.btn_all_disable.setText(tr("btn.all_disable"))
         retranslate_button_box(self._btn_box)
 
-        row = self.list_widget.currentRow()
-        self.refresh_list()
-        if 0 <= row < self.list_widget.count():
-            self.list_widget.setCurrentRow(row)
+        # 轻量刷新：只更新现有行文本，不重排、不重建，选中行保持不变。
+        # refresh_list() 会 _sort_by_date()，切语言后同一行号可能指向
+        # 不同条目，故不能复用。
+        if self.list_widget.count() != len(self.memorial_list):
+            # 数据与视图行数不一致（理论不应发生）：回退到完整重建，
+            # 按行号尽力恢复光标。
+            row = self.list_widget.currentRow()
+            self.refresh_list()
+            if 0 <= row < self.list_widget.count():
+                self.list_widget.setCurrentRow(row)
+            return
+        repeat_name_map = self._build_repeat_name_map()
+        for row, item in enumerate(self.memorial_list):
+            widget_item = self.list_widget.item(row)
+            if widget_item is not None:
+                widget_item.setText(
+                    self._format_item_text(item, repeat_name_map))
 
     def _sort_by_date(self):
         """
@@ -441,92 +446,101 @@ class MemorialDialog(RetranslatableDialog, QDialog):
 
         self.memorial_list.sort(key=_sort_key)
 
-    def refresh_list(self):
-        self.list_widget.clear()
-        normalized = []
-        for m in self.memorial_list:
-            if not isinstance(m, dict):
-                continue
-            try:
-                normalized.append(normalize_memorial(m))
-            except Exception:
-                continue
-        self.memorial_list = normalized
-        self._sort_by_date()
+    @staticmethod
+    def _clamp_weekday(day: Any) -> int:
+        """weekday 二次夹取：normalize 已保证 1..7，这里防御手工改配置。"""
+        try:
+            return max(1, min(7, int(day)))
+        except (TypeError, ValueError):
+            return 1
 
-        repeat_name_map = {
+    def _format_item_text(self, item: dict, repeat_name_map: dict) -> str:
+        """单条纪念日的列表展示文本。纯格式化，不触碰控件。"""
+        tname = (
+            tr("memorial.manage.type_solar")
+            if item.get("type") == "solar"
+            else tr("memorial.manage.type_lunar")
+        )
+        leap = (
+            tr("memorial.manage.leap_prefix") if item.get("isleap", False) else ""
+        )
+        advance = item.get("advance_days", 0)
+        enabled = item.get("enabled", True)
+        repeat = repeat_name_map.get(
+            item.get("repeat_type", REPEAT_YEAR),
+            tr("memorial.manage.repeat_prefix_year"),
+        )
+        status_text = (
+            tr("memorial.manage.status_enabled")
+            if enabled
+            else tr("memorial.manage.status_disabled")
+        )
+
+        if item.get("repeat_type") == REPEAT_WEEK:
+            wd = self._clamp_weekday(item.get("day", 1))
+            week_key = f"weekday.short.{wd}"
+            week_text = tr(week_key)
+            # tr 三级回退会在缺 key 时返回 key 本身；此时退化为数字
+            if week_text == week_key:
+                week_text = str(wd)
+            date_text = tr("memorial.manage.week_fmt").format(week=week_text)
+        else:
+            date_text = tr("memorial.manage.date_fmt").format(
+                month=item.get("month", 1), day=item.get("day", 1)
+            )
+        display_name = item.get("name") or tr("memorial.default_name")
+        return (
+            f"{status_text} | {display_name} | {repeat} | "
+            f"{tname}{leap}{date_text} | "
+            f"{tr('memorial.manage.advance_fmt').format(advance=advance)}"
+        )
+
+    def _find_row_by_item(self, target: dict) -> Optional[int]:
+        """按字段反查行号（name + 全部影响日期计算的键）。
+
+        TODO(known-issue): 同名 + 同 type/repeat_type/month/day 的条目
+        会被误判为同一条（仅影响光标位置，不影响数据正确性）。
+        修复需引入唯一标记或改为"不排序 + 展示副本"的 refresh 契约。
+        """
+        keys = ("name", "repeat_type", "day", "month", "type")
+        for row, item in enumerate(self.memorial_list):
+            if all(item.get(k) == target.get(k) for k in keys):
+                return row
+        return None
+    
+    @staticmethod
+    def _build_repeat_name_map() -> dict:
+        return {
             REPEAT_YEAR: tr("memorial.manage.repeat_prefix_year"),
             REPEAT_MONTH: tr("memorial.manage.repeat_prefix_month"),
             REPEAT_WEEK: tr("memorial.manage.repeat_prefix_week"),
         }
 
+    def refresh_list(self):
+        self.list_widget.clear()
+        # 数据已在写入侧（ConfigManager）或 AddMemorialDialog.get_data
+        # 处 normalize；这里只过滤非 dict（防御外部构造）。
+        self.memorial_list = [
+            m for m in self.memorial_list if isinstance(m, dict)
+        ]
+        self._sort_by_date()
+        repeat_name_map = self._build_repeat_name_map()
         for item in self.memorial_list:
-            tname = (
-                tr("memorial.manage.type_solar")
-                if item["type"] == "solar"
-                else tr("memorial.manage.type_lunar")
+            QListWidgetItem(
+                self._format_item_text(item, repeat_name_map),
+                self.list_widget,
             )
-            leap = (
-                tr("memorial.manage.leap_prefix") if item.get("isleap", False) else ""
-            )
-            advance = item.get("advance_days", 0)
-            enabled = item.get("enabled", True)
-            repeat = repeat_name_map.get(
-                item.get("repeat_type", REPEAT_YEAR),
-                tr("memorial.manage.repeat_prefix_year"),
-            )
-            status_text = (
-                tr("memorial.manage.status_enabled")
-                if enabled
-                else tr("memorial.manage.status_disabled")
-            )
-
-            if item.get("repeat_type") == REPEAT_WEEK:
-                # normalize 已夹取到 1..7，这里再夹一次以防手工改过配置
-                try:
-                    wd = max(1, min(7, int(item.get("day", 1))))
-                except (TypeError, ValueError):
-                    wd = 1
-                week_key = f"weekday.short.{wd}"
-                week_text = tr(week_key)
-                # tr 三级回退会在缺 key 时返回 key 本身；此时退化为数字，
-                # 比让用户看到 "weekday.short.6" 更体面。
-                if week_text == week_key:
-                    week_text = str(wd)
-                date_text = tr("memorial.manage.week_fmt").format(week=week_text)
-            else:
-                date_text = tr("memorial.manage.date_fmt").format(
-                    month=item["month"], day=item["day"]
-                )
-            display_name = item.get("name") or tr("memorial.default_name")
-            text = (
-                f"{status_text} | {display_name} | {repeat} | "
-                f"{tname}{leap}{date_text} | "
-                f"{tr('memorial.manage.advance_fmt').format(advance=advance)}"
-            )
-            QListWidgetItem(text, self.list_widget)
-
+      
     def add_item(self):
         dlg = AddMemorialDialog(self)
-        if dlg.exec():
-            new_item = dlg.get_data()
-            self.memorial_list.append(new_item)
-            self.refresh_list()
-            # 排序后位置不定，按字段反查行号定位光标。
-            # TODO(known-issue): 同名 + 同 type/repeat_type/month/day 的条目
-            #   会被误判为同一条（仅影响光标位置，不影响数据正确性）。
-            #   修复需引入唯一标记或改为"不排序 + 展示副本"的 refresh 契约。
-            for row in range(self.list_widget.count()):
-                item = self.memorial_list[row]
-                if (
-                    item.get("name") == new_item.get("name")
-                    and item.get("repeat_type") == new_item.get("repeat_type")
-                    and item.get("day") == new_item.get("day")
-                    and item.get("month") == new_item.get("month")
-                    and item.get("type") == new_item.get("type")
-                ):
-                    self.list_widget.setCurrentRow(row)
-                    break
+        if not dlg.exec():
+            return
+        new_item = dlg.get_data()
+        self.memorial_list.append(new_item)
+        self.refresh_list()
+        row = self._find_row_by_item(new_item)
+        if row is not None:
+            self.list_widget.setCurrentRow(row)
 
     def edit_item(self):
         row = self.list_widget.currentRow()

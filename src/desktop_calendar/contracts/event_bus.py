@@ -4,22 +4,13 @@ from typing import Callable, Any, Dict, List, Tuple
 
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QCoreApplication
 
-from desktop_calendar.config.config import get_logger
+from desktop_calendar.utils.logging_setup import get_logger
 
 logger = get_logger()
 
 
 def _same_callable(a, b) -> bool:
-    """
-    安全比较两个 callable 是否指向同一个绑定方法。
-
-    绑定方法每次属性访问都会 new 一个对象，is 永远 False，需退化到
-    比较 __self__ 和 __func__。
-
-    全程 try 包裹：callable 的 __eq__ / __getattr__ 由第三方或用户
-    回调引入，任何一步抛异常都按"不相同"处理，避免异常冒泡到
-    subscribe / unsubscribe 打断订阅表操作。
-    """
+    """安全比较两个 callable 是否指向同一个绑定方法。"""
     try:
         if a is b:
             return True
@@ -27,23 +18,26 @@ def _same_callable(a, b) -> bool:
         sb = getattr(b, "__self__", None)
         fa = getattr(a, "__func__", None)
         fb = getattr(b, "__func__", None)
-        if sa is None or sb is None or fa is None or fb is None:
-            return bool(a == b)
-        return sa is sb and fa is fb
+        if sa is not None and sb is not None and fa is not None and fb is not None:
+            return sa is sb and fa is fb
+        return bool(a == b)
     except Exception:
         logger.debug(
             "比较 callable 失败，按不相同处理: %r vs %r", a, b, exc_info=True)
         return False
 
 
-class EventBus(QObject):
-    """
-    事件总线：发布-订阅模式，解耦各模块间通信。
+def _warn_if_not_main_thread(action: str) -> None:
+    """从非主线程调用 EventBus 时记 warning。"""
+    app = QCoreApplication.instance()
+    if app is not None and QThread.currentThread() is not app.thread():
+        logger.warning(
+            f"EventBus.{action} 从非主线程调用，"
+            f"订阅者槽可能在错误线程执行")
 
-    本类只做"订阅/发布"的真实工作，每次构造都是独立实例；全局唯一
-    由模块级 _EventBusProxy 保证。API 与旧版一致：
-    `from event_bus import event_bus` 拿到代理对象。
-    """
+
+class EventBus(QObject):
+    """事件总线：发布-订阅模式，解耦各模块间通信。"""
     _dispatch_signal = pyqtSignal(str, dict)
 
     def __init__(self):
@@ -54,10 +48,7 @@ class EventBus(QObject):
     def subscribe(self, event_type: str, slot: Callable[[dict], Any]) -> None:
         with self._lock:
             entries = self._subscriber_map.setdefault(event_type, [])
-            # 幂等：同一 event_type 下同一 slot 不重复订阅。
-            # 与 i18n.on_language_changed 的去重策略一致，防止
-            # "构造 → 订阅 → 关闭 → 再构造"的循环里 publish 时
-            # 同一 slot 被调用多次。
+            # 幂等：同一 event_type 下同一 slot 不重复订阅
             for s, _ in entries:
                 if _same_callable(s, slot):
                     return
@@ -65,7 +56,6 @@ class EventBus(QObject):
             def _wrapper(etype: str, data: dict):
                 if etype != event_type:
                     return
-                # 单个订阅者抛异常不应吃掉后续订阅者
                 try:
                     slot(data)
                 except Exception:
@@ -91,17 +81,11 @@ class EventBus(QObject):
             if not entries and event_type in self._subscriber_map:
                 del self._subscriber_map[event_type]
 
-    def publish(self, event_type: str, **kwargs) -> None:
+    def publish(self, event_type, **kwargs):
+        _warn_if_not_main_thread("publish")
         self._dispatch_signal.emit(event_type, kwargs)
 
     def clear_all(self) -> None:
-        """清空所有订阅，并断开 signal 连接。
-
-        用于测试隔离 / 运行时重置。只清 _subscriber_map 不够：
-        _dispatch_signal 上的 wrapper 连接还在（虽然 wrapper 里
-        etype != event_type 会早退，但 slot 引用仍被 Qt 持有，
-        阻断对话框 / 主窗口的 GC）。
-        """
         with self._lock:
             for entries in self._subscriber_map.values():
                 for _, wrapper in entries:
@@ -113,13 +97,7 @@ class EventBus(QObject):
 
 
 class _EventBusProxy:
-    """
-    懒创建 + 线程安全的全局代理，API 与原 EventBus 完全兼容。
-
-    用代理而非直接模块级 EventBus()：
-      - import 期构造 QObject 有 Qt 时序风险（QApplication 尚未创建）；
-      - 代理本身非 QObject，可被任何线程安全访问。
-    """
+    """懒创建 + 线程安全的全局代理，API 与原 EventBus 完全兼容。"""
     __slots__ = ("_impl", "_lock")
 
     def __init__(self):
@@ -130,41 +108,27 @@ class _EventBusProxy:
         if self._impl is None:
             with self._lock:
                 if self._impl is None:
-                    app = QCoreApplication.instance()
-                    # 说明：pyqtSignal 的 AutoConnection 按"emit 线程 vs
-                    # 接收者（本 EventBus 实例）所属线程"判定。EventBus
-                    # 一旦在子线程首次构造，后续从主线程 emit 时订阅者
-                    # 会被排队到子线程执行 —— 这才是真正的隐患。
-                    if (app is not None
-                            and QThread.currentThread() is not app.thread()):
-                        logger.warning(
-                            "EventBus 在非主线程首次构造，"
-                            "订阅者可能被投递到非主线程。"
-                            "请确保首次 subscribe/publish 在主线程发生。")
+                    # 首次构造必须在主线程，否则 AutoConnection 会把
+                    # 后续主线程 emit 投递到子线程
+                    _warn_if_not_main_thread("首次构造")
                     self._impl = EventBus()
         return self._impl
 
     def subscribe(self, event_type, slot):
-        app = QCoreApplication.instance()
-        if app is None:
-            logger.warning("EventBus.subscribe 在 QApplication 创建前调用")
-        elif QThread.currentThread() is not app.thread():
-            logger.warning(
-                "EventBus.subscribe 从非主线程调用，"
-                "订阅者槽可能在错误线程执行")
+        _warn_if_not_main_thread("subscribe")
         return self._ensure().subscribe(event_type, slot)
 
     def unsubscribe(self, event_type, slot):
-        app = QCoreApplication.instance()
-        if app is not None and QThread.currentThread() is not app.thread():
-            logger.warning("EventBus.unsubscribe 从非主线程调用")
+        _warn_if_not_main_thread("unsubscribe")
         return self._ensure().unsubscribe(event_type, slot)
 
     def publish(self, event_type, **kwargs):
+        _warn_if_not_main_thread("publish")
         return self._ensure().publish(event_type, **kwargs)
 
     def clear_all(self):
         if self._impl is not None:
             self._impl.clear_all()
+
 
 event_bus = _EventBusProxy()

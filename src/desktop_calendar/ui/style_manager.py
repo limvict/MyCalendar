@@ -1,12 +1,87 @@
 # coding: utf-8
+import json
 import os
+from typing import Optional
 from PyQt6.QtCore import QObject, QFileSystemWatcher, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
-from desktop_calendar.config.config import ConfigManager, get_resource_path, get_logger
-from desktop_calendar.config.constants import DEFAULT_THEME, load_theme
+from desktop_calendar.config.manager import ConfigManager, get_resource_path, get_logger
+from desktop_calendar.config.constants import DEFAULT_THEME
 
 logger = get_logger()
 
+def load_theme(theme_path: Optional[str] = None) -> dict:
+    """加载主题配置：优先读取外部文件，失败则返回默认主题。
+
+    从 config.constants 迁入。逻辑不变。
+    """
+    theme = dict(DEFAULT_THEME)
+
+    if theme_path is None:
+        try:
+            theme_path = get_resource_path("theme.json")
+        except Exception as e:
+            logger.warning(f"获取默认主题路径失败，使用默认主题：{e}")
+            return theme
+    if not theme_path or not os.path.exists(theme_path):
+        logger.warning(f"主题文件 {theme_path!r} 不存在，使用默认主题")
+        return theme
+    try:
+        with open(theme_path, "r", encoding="utf-8") as f:
+            custom_theme = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"主题文件读取或解析失败，使用默认主题：{e}")
+        return theme
+    except Exception as e:
+        logger.warning(f"加载主题文件时发生未知错误，使用默认主题：{e}")
+        return theme
+
+    if not isinstance(custom_theme, dict):
+        logger.warning(
+            f"主题文件内容不是 JSON 对象（实际为 {type(custom_theme).__name__}），"
+            f"使用默认主题")
+        return theme
+
+    unknown_keys = set(custom_theme) - set(DEFAULT_THEME)
+    if unknown_keys:
+        logger.warning(
+            f"主题文件中存在未知配置项，已忽略：{', '.join(sorted(unknown_keys))}")
+
+    for key, value in custom_theme.items():
+        if key not in DEFAULT_THEME:
+            continue
+        if value is None:
+            logger.warning(f"主题配置项 {key!r} 为 None，已保留默认值")
+            continue
+        coerced = _coerce_theme_value(key, value)
+        if coerced is None:
+            logger.warning(
+                f"主题配置项 {key!r} 的值 {value!r} 类型不合法，已保留默认值")
+            continue
+        theme[key] = coerced
+    return theme
+
+def _coerce_theme_value(key: str, value):
+    """按 DEFAULT_THEME[key] 的类型归一化。返回 None 表示保留默认。"""
+    default = DEFAULT_THEME[key]
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else None
+    if isinstance(default, int):
+        if isinstance(value, bool):      # bool 是 int 子类，必须拦
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(default, float):
+        if isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(default, str):
+        return value if isinstance(value, str) else None
+    return value
 
 class StyleManager(QObject):
     """UI 样式统一管理：主题加载、文件监视、热更新、全控件刷新。"""

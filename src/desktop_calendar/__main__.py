@@ -5,8 +5,8 @@ import sys
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-from desktop_calendar.bootstrap import wiring
-from desktop_calendar.config.config import get_resource_path
+from desktop_calendar import wiring          # ← 模块直接可用
+from desktop_calendar.config.manager import get_resource_path
 from desktop_calendar.ui.main_window import MainWindow
 
 

@@ -1,14 +1,6 @@
 # coding: utf-8
 from __future__ import annotations
 
-import json
-import os
-from typing import Optional        
-
-from desktop_calendar.config.config import get_resource_path, get_logger, to_bool 
-
-logger = get_logger()
-
 # 月份天数校验基准年，必须为闰年（2 月 29 天）。
 # memorial.normalize_memorial 与 dialogs.AddMemorialDialog._on_accept
 # 必须共用此常量，否则会出现"UI 允许 2/29 但 normalize 收敛到 2/28"。
@@ -60,51 +52,6 @@ DEFAULT_THEME = {
     "tag_bg": "#222222",
     "tag_text_color": "#FFFFFF",
 }
-
-
-def load_theme(theme_path: Optional[str] = None) -> dict:
-    """加载主题配置：优先读取外部文件，失败则返回默认主题。"""
-    theme = dict(DEFAULT_THEME)
-
-    if theme_path is None:
-        try:
-            theme_path = get_resource_path("theme.json")
-        except Exception as e:
-            logger.warning(f"获取默认主题路径失败，使用默认主题：{e}")
-            return theme
-    if not theme_path or not os.path.exists(theme_path):
-        logger.warning(f"主题文件 {theme_path!r} 不存在，使用默认主题")
-        return theme
-    try:
-        with open(theme_path, "r", encoding="utf-8") as f:
-            custom_theme = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        logger.warning(f"主题文件读取或解析失败，使用默认主题：{e}")
-        return theme
-    except Exception as e:
-        logger.warning(f"加载主题文件时发生未知错误，使用默认主题：{e}")
-        return theme
-
-    if not isinstance(custom_theme, dict):
-        logger.warning(
-            f"主题文件内容不是 JSON 对象（实际为 {type(custom_theme).__name__}），"
-            f"使用默认主题")
-        return theme
-
-    unknown_keys = set(custom_theme) - set(DEFAULT_THEME)
-    if unknown_keys:
-        logger.warning(
-            f"主题文件中存在未知配置项，已忽略：{', '.join(sorted(unknown_keys))}")
-
-    for key, value in custom_theme.items():
-        if key not in DEFAULT_THEME:
-            continue
-        if value is None:
-            logger.warning(f"主题配置项 {key!r} 为 None，已保留默认值")
-            continue
-        theme[key] = value
-    return theme
-
 
 # 农历传统节日（月,日）-> 名称，只对这些文字标红
 LUNAR_FESTIVALS = {

@@ -1,14 +1,17 @@
 # coding: utf-8
+
+from __future__ import annotations
 from datetime import datetime
 
 from PyQt6.QtCore import QObject, QDate, QTimer
 
-from desktop_calendar.contracts.ports.holiday_source import HolidaySourceFactory
-from desktop_calendar.config.config import (
+from desktop_calendar.contracts.holiday_source import HolidaySourceFactory, HolidaySourceError
+from desktop_calendar.config.manager import (
     ConfigManager, load_holiday_cache, save_holiday_cache, get_logger,
 )
 from desktop_calendar.contracts.event_bus import event_bus
 from desktop_calendar.contracts.events import EventType
+
 
 logger = get_logger()
 
@@ -29,18 +32,28 @@ class HolidayManager(QObject):
         self.holiday_cache = load_holiday_cache()
         self._has_notified_error = False
         self._shutting_down = False
+        
+        if not callable(source_factory):
+            logger.error("source_factory 不可调用，节假日降级为本地缓存")
+            self._source = None
+        else:
+            try:
+                self._source = source_factory(
+                    on_ready=self._on_net_ready,
+                    on_error=self._on_net_error,
+                    parent=self,
+                )
+            except Exception:
+                logger.warning(
+                    "HolidaySource 工厂构造失败，节假日将只用本地缓存",
+                    exc_info=True)
 
-        self._source = source_factory(
-            on_ready=self._on_net_ready,
-            on_error=self._on_net_error,
-            parent=self,
-        )
         started = False
-        try:
-            started = bool(self._source.start())
-        except Exception:
-            logger.warning("HolidaySource.start 失败", exc_info=True)
-
+        if self._source is not None:
+            try:
+                started = bool(self._source.start())
+            except Exception:
+                logger.warning("HolidaySource.start 失败", exc_info=True)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(self.REFRESH_INTERVAL_MS)
         self._refresh_timer.timeout.connect(self.fetch_current_year)
@@ -86,9 +99,12 @@ class HolidayManager(QObject):
             return
         y = QDate.currentDate().year()
         try:
-            source.request(y)
+            if not source.request(y):
+                logger.debug("HolidaySource 未接受 %s 年请求（可能已在途）", y)
             if QDate.currentDate().month() == 12:
-                source.request(y + 1)
+                if not source.request(y + 1):
+                    logger.debug(
+                        "HolidaySource 未接受 %s 年请求（可能已在途）", y + 1)
         except Exception:
             logger.warning("HolidaySource.request 失败", exc_info=True)
 
@@ -103,14 +119,15 @@ class HolidayManager(QObject):
         }
         self._has_notified_error = False
         save_holiday_cache(self.holiday_cache)
-        event_bus.publish(EventType.HOLIDAY_UPDATED, data=self.apply_cached())
-
-    def _on_net_error(self, err: str):
+        event_bus.publish(
+            EventType.HOLIDAY_UPDATED, holiday_data=self.apply_cached())
+        
+    def _on_net_error(self, year: int, err: HolidaySourceError):
         if self._shutting_down:
             return
         if not self._has_notified_error:
             self._has_notified_error = True
-            logger.warning(f"节假日网络错误: {err}")
+            logger.warning("节假日网络错误（%s 年）: %s", year, err)
 
     def shutdown(self):
         """安全关闭数据源。幂等。"""

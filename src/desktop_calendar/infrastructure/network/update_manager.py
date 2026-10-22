@@ -34,7 +34,7 @@ from urllib.error import URLError
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from desktop_calendar.config.config import get_logger, get_config_path, config
+from desktop_calendar.config.manager import get_logger, get_config_path, config
 from desktop_calendar.contracts.event_bus import event_bus
 from desktop_calendar.contracts.events import EventType
 
@@ -284,6 +284,7 @@ class UpdateDownloader(QThread):
             'set "VER=%DLC_VERSION%"',
             "set /a WAIT_MAX=%DLC_WAIT%",
             "set /a WAIT_COUNT=0",
+            "set /a PROBE_SEC=%DLC_PROBE%",
             'for %%F in ("%EXE%") do set "EXE_NAME=%%~nxF"',
             "",
             'call :log "updater start pid=%TARGET_PID% ver=%VER%"',
@@ -308,26 +309,36 @@ class UpdateDownloader(QThread):
             'move /y "%NEW%" "%EXE%" >nul 2>>"%LOG%"',
             "if errorlevel 1 (",
             'call :log "install new failed - rollback"',
-            "goto rollback",
+            'call :do_rollback "install_failed" "rollback_failed"',
+            "goto cleanup",
             ")",
             'call :log "start new"',
             'start "" "%EXE%"',
+            'call :log "probe new version (%PROBE_SEC%s)"',
+            # 无控制台环境不能用 timeout；ping 等待约 (PROBE_SEC-1) 秒
+            "ping -n %PROBE_SEC% 127.0.0.1 >nul",
+            'tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>nul | find /I "%EXE_NAME%" >nul',
+            "if errorlevel 1 (",
+            'call :log "probe failed: new version exited"',
+            'call :do_rollback "probe_failed" "probe_rollback_failed"',
+            "goto cleanup",
+            ")",
             'call :log "update success"',
             'del /f /q "%STATE%" >nul 2>&1',
             "goto cleanup",
             "",
-            ":rollback",
-            'call :log "rollback: restore old"',
+            ":do_rollback",
+            'call :log "rollback: restore old (reason=%~1)"',
             'move /y "%OLD%" "%EXE%" >nul 2>>"%LOG%"',
             "if errorlevel 1 (",
             'call :log "rollback failed - cannot restore old"',
-            'call :write_state "rollback_failed"',
-            "goto cleanup",
+            'call :write_state "%~2"',
+            "goto :eof",
             ")",
             'call :log "rollback: start old"',
-            'call :write_state "install_failed"',
+            'call :write_state "%~1"',
             'start "" "%EXE%"',
-            "goto cleanup",
+            "goto :eof",
             "",
             ":write_state",
             '> "%STATE%" (',
@@ -650,7 +661,6 @@ class UpdateManager(QObject):
     def _on_downloaded(self, result: dict):
         # 线程即将结束，清引用；对象由 deleteLater 回收
         self._downloader = None
-
         if result.get("cancelled"):
             logger.info("更新下载已取消")
             return

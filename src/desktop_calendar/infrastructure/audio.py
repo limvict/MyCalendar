@@ -1,7 +1,7 @@
 # coding: utf-8
 import os
 from PyQt6.QtCore import QObject
-from desktop_calendar.config.config import get_logger
+from desktop_calendar.config.manager import get_logger
 
 try:
     import winsound
@@ -27,7 +27,7 @@ class SoundManager(QObject):
     两者都通过 winsound 的 SND_ASYNC 异步播放，不阻塞 UI。
     """
 
-    def __init__(self, parent, get_resource_path, volume: float = 0.8):
+    def __init__(self, parent, get_resource_path):
         super().__init__(parent)
         self._get_resource = get_resource_path
         self._sound_cache = {}

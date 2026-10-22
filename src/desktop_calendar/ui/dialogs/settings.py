@@ -15,12 +15,12 @@ import json
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QCheckBox, QSpinBox, QPushButton, QSlider, QGroupBox,
+    QLabel, QCheckBox, QPushButton, QSlider, QGroupBox,
     QFileDialog, QComboBox,
 )
 
 from desktop_calendar.config.i18n import tr, available_languages
-from desktop_calendar.config.config import get_logger
+from desktop_calendar.config.manager import get_logger
 
 from .messages import msg_info, msg_error
 from .base import (
@@ -29,9 +29,8 @@ from .base import (
     retranslate_button_box,
 )
 from .memorial import MemorialDialog
-
-from desktop_calendar.config.constants import to_bool
-from desktop_calendar.core.memorial import normalize_memorial
+from desktop_calendar.utils.coerce import to_bool
+from desktop_calendar.core.memorial import normalize_memorial_days
 
 logger = get_logger()
 
@@ -150,7 +149,7 @@ class SettingDialog(RetranslatableDialog, QDialog):
         lay_data.addWidget(self.btn_import)
         main_layout.addWidget(self.group_data)
 
-        self.btn_mem = QPushButton(tr("setting.memorial_mgr"))
+        self.btn_mem = QPushButton(tr("setting.manage_memorial"))
         self.btn_mem.clicked.connect(self.open_mem_dialog)
         main_layout.addWidget(self.btn_mem)
 
@@ -214,20 +213,8 @@ class SettingDialog(RetranslatableDialog, QDialog):
         if not isinstance(raw_mem, list):
             self.cfg["memorial_days"] = []
         else:
-            cleaned = []
-            skipped = 0
-            for i, item in enumerate(raw_mem):
-                if not isinstance(item, dict):
-                    logger.warning(f"导入配置：跳过第 {i} 条（非 dict）")
-                    skipped += 1
-                    continue
-                try:
-                    cleaned.append(normalize_memorial(item))
-                except Exception as e:
-                    logger.warning(
-                        f"导入配置：第 {i} 条纪念日归一化失败，已跳过: {e}")
-                    skipped += 1
-            self.cfg["memorial_days"] = cleaned
+            normalized, skipped = normalize_memorial_days(raw_mem)
+            self.cfg["memorial_days"] = normalized
             if skipped:
                 logger.info(f"导入配置：共跳过 {skipped} 条无效纪念日")
 

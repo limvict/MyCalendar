@@ -2,13 +2,23 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-.venv/
-venv/
-env/
+/.venv/
+/venv/
+/env/
 
-# ---------- pytest ----------
+# ---------- pytest / coverage ----------
 .pytest_cache/
 .pytest_tmp/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---------- 类型检查 / lint 缓存 ----------
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
 
 # ---------- PyInstaller / build ----------
 /build/app/
@@ -17,8 +27,8 @@ env/
 *.spec.bak
 
 # ---------- release output ----------
-/release/
-# !/release/README.md
+/release/*
+!/release/version.json
 
 # ---------- generic build artifacts ----------
 *.exe
@@ -26,8 +36,14 @@ env/
 *.dmg
 *.pkg
 
+# ---------- 归档 ----------
+*.rar
+*.7z
+
+# ---------- 本地开发配置 ----------
+desktop_calendar/config/config.json
+
 # ---------- root temp files ----------
-/tmp_app.exe
 /tmp_v.json
 
 # ---------- IDE / OS ----------
@@ -38,4 +54,6 @@ Thumbs.db
 
 # ---------- secrets / logs ----------
 .env
+.env.*
+!.env.example
 *.log

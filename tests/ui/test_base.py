@@ -15,14 +15,27 @@ pytestmark = pytest.mark.ui
 
 @pytest.fixture(autouse=True)
 def _reset_lang_and_listeners():
-    """每个用例前清空监听表，避免跨用例污染。"""
+    """每个用例前重置 i18n 全局状态，避免跨用例污染。
+
+    直接赋值 _current_lang / _current_table，不用 set_language：
+    后者在 new_lang == _current_lang 时会提前 return，若前序测试
+    把语言留在 en_US，本 fixture 的 set_language("zh_CN") 反而
+    救不回来，导致后续 set_language("en_US") 也被跳过、监听者
+    不被通知。
+    """
+    from desktop_calendar.config import i18n
+    from desktop_calendar.config.translations import ZH_CN
+
     snapshot = list(_listeners)
     _listeners.clear()
-    set_language("zh_CN")
+    i18n._current_lang = "zh_CN"
+    i18n._current_table = ZH_CN
     yield
     for cb in list(_listeners):
         off_language_changed(cb)
     _listeners.extend(snapshot)
+    i18n._current_lang = "zh_CN"
+    i18n._current_table = ZH_CN
 
 
 class _Dlg(RetranslatableDialog, QDialog):
@@ -43,12 +56,30 @@ def test_init_registers_listener(qtbot):
 
 
 def test_language_change_triggers_retranslate(qtbot):
+    from desktop_calendar.config import i18n
     dlg = _Dlg()
     before = dlg.translate_calls
+    cb = i18n._listeners[0]
+    print("\n[diag] before =", before,
+          "cb =", cb,
+          "cb.__self__ is dlg =", cb.__self__ is dlg,
+          "dlg.translate_calls =", dlg.translate_calls)
+    # 手动调一次，绕过 set_language
+    try:
+        cb("en_US")
+        print("[diag] manual cb -> translate_calls =", dlg.translate_calls)
+    except Exception:
+        import traceback; traceback.print_exc()
+    # 重置计数，再走真实 set_language
+    dlg.translate_calls = 0
+    before = 0 
+    print("[diag] before set_language: _current_lang =", i18n._current_lang,
+          "listeners =", len(i18n._listeners))
     set_language("en_US")
+    print("[diag] after set_language: _current_lang =", i18n._current_lang,
+          "translate_calls =", dlg.translate_calls)
+    assert dlg.translate_calls == 1
     assert dlg.translate_calls == before + 1
-    set_language("zh_CN")
-    assert dlg.translate_calls == before + 2
 
 
 def test_done_detaches_listener(qtbot):

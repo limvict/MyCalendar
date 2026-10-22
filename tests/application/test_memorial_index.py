@@ -1,4 +1,4 @@
-from desktop_calendar.application.memorial_index import build_memorial_index
+from desktop_calendar.core.memorial import build_memorial_index
 
 
 def test_build_index_buckets():

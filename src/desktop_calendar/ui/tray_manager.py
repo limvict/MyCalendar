@@ -3,7 +3,7 @@ import os
 from PyQt6.QtCore import QObject
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QStyle, QApplication
-from desktop_calendar.config.config import ConfigManager, get_logger
+from desktop_calendar.config.manager import ConfigManager, get_logger
 from desktop_calendar.contracts.event_bus import event_bus
 from desktop_calendar.contracts.events import EventType
 from desktop_calendar.config.i18n import tr
@@ -21,6 +21,7 @@ class TrayManager(QObject):
         self._get_resource = get_resource_path
         self.tray_icon = None
         self.act_topmost = None
+        self._menu = None
         # 需要重翻菜单文本的 QAction 引用。
         # 之前是局部变量，语言切换时拿不到；提升为实例属性后
         # retranslate_ui 才能覆盖全部菜单项。
@@ -44,8 +45,8 @@ class TrayManager(QObject):
                 QStyle.StandardPixmap.SP_ComputerIcon)
         self.tray_icon.setIcon(icon)
 
-        menu = QMenu()
-        menu.setStyleSheet("""
+        self._menu = QMenu()
+        self._menu.setStyleSheet("""
             QMenu{background-color:#f7f3ed;border:1px solid #d8d2c5;border-radius:12px;padding:6px;}
             QMenu::item{padding:6px 20px;background:transparent;border-radius:8px;color:#444;}
             QMenu::item:selected{background:#d9e2d6;}
@@ -73,15 +74,15 @@ class TrayManager(QObject):
         self._act_quit = QAction(tr("tray.quit"), self)
         self._act_quit.triggered.connect(self._on_quit)
 
-        menu.addAction(self._act_show)
-        menu.addAction(self.act_topmost)
-        menu.addSeparator()
-        menu.addAction(self._act_backup)
-        menu.addAction(self._act_restore)
-        menu.addSeparator()
-        menu.addAction(self._act_settings)
-        menu.addAction(self._act_quit)
-        self.tray_icon.setContextMenu(menu)
+        self._menu.addAction(self._act_show)
+        self._menu.addAction(self.act_topmost)
+        self._menu.addSeparator()
+        self._menu.addAction(self._act_backup)
+        self._menu.addAction(self._act_restore)
+        self._menu.addSeparator()
+        self._menu.addAction(self._act_settings)
+        self._menu.addAction(self._act_quit)
+        self.tray_icon.setContextMenu(self._menu)
         self.tray_icon.activated.connect(self._on_activated)
         self.tray_icon.show()
 

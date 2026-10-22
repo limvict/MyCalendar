@@ -70,6 +70,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Check i18n keys
+        run: python -m pytest tests/test_i18n_source.py -q
+
       - name: Run tests
         run: pytest -v --durations=10
         env:

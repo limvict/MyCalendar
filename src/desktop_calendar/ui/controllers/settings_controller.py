@@ -12,14 +12,14 @@
 import copy
 from PyQt6.QtWidgets import QDialog
 
-from desktop_calendar.ui.controllers.auto_start_ui import (
+from desktop_calendar.ui.controllers.startup import (
     check_auto_start, apply_auto_start,
 )
 from desktop_calendar.ui.dialogs import SettingDialog
 from desktop_calendar.contracts.event_bus import event_bus
 from desktop_calendar.contracts.events import EventType
 from desktop_calendar.config.i18n import set_language
-from desktop_calendar.config.config import config, get_logger
+from desktop_calendar.config.manager import config, get_logger
 
 logger = get_logger()
 
@@ -57,8 +57,10 @@ def apply_settings(window, dlg: SettingDialog) -> None:
     lang_changed = new_lang != config.get("language", "zh_CN")
     new_cfg["language"] = new_lang
 
-    new_cfg["topmost"] = bool(dlg.get_topmost_status())
-    new_cfg["opacity"] = float(dlg.get_opacity())
+    final_topmost = bool(dlg.get_topmost_status())
+    final_opacity = float(dlg.get_opacity())
+    new_cfg["topmost"] = final_topmost
+    new_cfg["opacity"] = final_opacity
     new_cfg["memorial_days"] = dlg.get_memorial_list()
 
     mem_cfg = dict(new_cfg.get("memorial_cfg") or {})
@@ -69,13 +71,10 @@ def apply_settings(window, dlg: SettingDialog) -> None:
     config.replace_all(new_cfg, save=False)
     config.flush()
 
-    final_opacity = dlg.get_opacity()
-    final_topmost = dlg.get_topmost_status()
     window.window_state.set_opacity(final_opacity)
     window.window_state.set_topmost(final_topmost)
 
     event_bus.publish(EventType.MEMORIAL_CHANGED, check_today=True)
-    event_bus.publish(EventType.SETTINGS_CHANGED)
     window.tray_mgr.update_topmost_check(final_topmost)
     if lang_changed:
         set_language(new_lang)

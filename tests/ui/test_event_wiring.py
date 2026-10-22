@@ -3,7 +3,7 @@
 import pytest
 
 from desktop_calendar.contracts.event_bus import event_bus
-from desktop_calendar.bootstrap import wiring as event_wiring
+from desktop_calendar import wiring as event_wiring
 pytestmark = pytest.mark.ui
 
 class _StubWindow:

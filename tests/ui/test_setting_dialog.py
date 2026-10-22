@@ -96,4 +96,34 @@ def test_init_tolerates_none_cfg_fields(qapp):
     dlg = _make_dlg({"memorial_days": None, "memorial_cfg": None})
     assert dlg.cfg["memorial_days"] == []
     assert dlg.cfg["memorial_cfg"] == {}
-    assert dlg.get_memorial_list() == [] 
+    assert dlg.get_memorial_list() == []
+    
+def test_import_config_keeps_memorial_days(tmp_path, qtbot, monkeypatch):
+    """导入含 memorial_days 的 JSON 后，self.cfg["memorial_days"]
+    必须是 list（不是 tuple），且条目被保留。"""
+    import json
+    from desktop_calendar.ui.dialogs.settings import SettingDialog
+
+    dlg = SettingDialog({}, False, False, 0.92, True, True)
+    qtbot.addWidget(dlg)
+
+    src = tmp_path / "import.json"
+    src.write_text(json.dumps({
+        "memorial_days": [
+            {"name": "生日", "type": "solar", "month": 6, "day": 15},
+            {"name": "坏数据", "type": "solar", "month": 13, "day": 99},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    # 绕过 QFileDialog 直接调导入逻辑
+    import desktop_calendar.ui.dialogs.settings as settings_mod
+    monkeypatch.setattr(
+        settings_mod.QFileDialog, "getOpenFileName",
+        staticmethod(lambda *a, **kw: (str(src), "JSON (*.json)")),
+    )
+    dlg._import_config()
+
+    assert isinstance(dlg.cfg["memorial_days"], list)
+    assert len(dlg.cfg["memorial_days"]) == 2
+    # 第 2 条 month/day 越界会被 normalize 收敛，但记录保留
+    assert dlg.cfg["memorial_days"][0]["name"] == "生日"
