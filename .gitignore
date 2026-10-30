@@ -1,0 +1,63 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+/.venv/
+/venv/
+/env/
+
+# ---------- pytest / coverage ----------
+.pytest_cache/
+.pytest_tmp/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---------- 类型检查 / lint 缓存 ----------
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+
+# ---------- PyInstaller / build ----------
+/build/app/
+/build/lib/
+/dist/          
+/release/      
+*.spec.bak
+/build/version_info.txt
+
+# ---------- generic build artifacts ----------
+*.exe
+*.msi
+*.dmg
+*.pkg
+
+# ---------- 归档 ----------
+*.rar
+*.7z
+
+# ---------- 本地开发配置 ----------
+src/desktop_calendar/config/config.json
+# 若希望忽略任意位置的本程序配置，改成：
+# **/desktop_calendar/config/config.json
+
+# ---------- root temp files ----------
+/tmp_v.json
+
+# ---------- IDE / OS ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---------- secrets / logs ----------
+.env
+.env.*
+!.env.example
+*.log
+
+/build/DesktopCalendar/
+*.whl
+*.tar.gz

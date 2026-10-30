@@ -1,0 +1,150 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  # 手动触发仅构建 + 全链路校验，不发布 Release。
+  # 用于在真正打 tag 之前验证 patch → verify → build → manifest → verify。
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Dry-run version (e.g. 3.0.3). No release will be published."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # windows-latest 上 choco 安装 Inno Setup + PyInstaller onefile 构建
+    # 在慢速 runner 上可能逼近 20 分钟，留余量。
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          # 依赖清单唯一来源是 pyproject.toml。
+          cache-dependency-path: pyproject.toml
+
+      # 依赖源统一到 pyproject.toml。[build] extras 里 pin 了
+      # pyinstaller>=6.0,<7，防止未来 PyInstaller 大版本升级破坏
+      # app.spec 而不自知。
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      # 版本来源：
+      #   push tag    → 从 GITHUB_REF_NAME 剥前缀 v
+      #   workflow_dispatch → 从 inputs.version（预演用）
+      # 正式版必须严格 X.Y.Z；带后缀（如 3.0.3-beta.1）视为 prerelease，
+      # 不会进入 /releases/latest 通道，用户更新器不会拉到。
+      #
+      # 注意：scripts/_version.py 的 validate_ver 当前只认 X.Y.Z，
+      # 若确实要发 prerelease，需同步放宽该正则；否则先只用正式版。
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.version }}"
+          else
+            TAG="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version must be X.Y.Z or X.Y.Z-suffix (got: $TAG)"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 1) 版本注入：pyproject.toml + update_manager.py + installer.iss
+      #    + build/version_info.txt（app.spec 的 exe 版本资源）
+      - name: Patch version sources + version_info
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: python scripts/patch_updater.py --version-info
+
+      # 2) 构建前一致性检查：此时还没有 manifest，不加 --manifest-required
+      - name: Verify version sources
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: python scripts/check_version.py
+
+      # 产物统一落 release/，与 build/build.py 的 --distpath 保持一致
+      - name: Build exe (PyInstaller onefile)
+        run: python -m PyInstaller --noconfirm --clean --distpath release build/app.spec
+
+      - name: Verify single-file exe
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+
+          p = pathlib.Path("release/DesktopCalendar.exe")
+          if not p.exists():
+              print(f"::error::Expected single-file exe at {p}", file=sys.stderr)
+              sys.exit(1)
+          size = p.stat().st_size
+          if size < 1_000_000:
+              print(f"::error::exe too small: {size} bytes", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: {p} = {size} bytes")
+          PY
+
+      # 3) Inno Setup：版本已由 patch_updater.py 注入 installer.iss，
+      #    不再传 /DMyAppVersion —— 与脚本内 #define 同名会触发
+      #    preprocessor "Duplicate identifier" 错误。
+      #    显式 pin 到 Inno 6.3.3：防止 chocolatey 上游切到 Inno 7 后
+      #    安装路径与 directive 默认行为变化导致构建失败。
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.3.3 -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" build\installer.iss
+          $setup = Get-ChildItem release/DesktopCalendar_Setup_*.exe -ErrorAction SilentlyContinue
+          if (-not $setup) {
+            Write-Error "Inno Setup did not produce release/DesktopCalendar_Setup_*.exe"
+            Get-ChildItem release/ | Format-Table
+            exit 1
+          }
+          Write-Host "OK: $($setup.Name) ($($setup.Length) bytes)"
+
+      # 4) manifest 由脚本生成，schema 唯一来源
+      - name: Generate update manifest
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/patch_updater.py --manifest
+
+      # 5) 构建后一致性检查：manifest 已存在，强制校验
+      - name: Verify version + manifest + sha256
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: python scripts/check_version.py --manifest-required --verify-sha256
+
+      # 仅在 push tag 时发布；workflow_dispatch 视作预演，不创建 Release。
+      # prerelease 由版本号后缀决定，见上方 Resolve version。
+      - uses: softprops/action-gh-release@v2
+        if: github.event_name == 'push'
+        with:
+          prerelease: ${{ steps.ver.outputs.prerelease == 'true' }}
+          files: |
+            release/DesktopCalendar.exe
+            release/version.json
+            release/DesktopCalendar_Setup_*.exe
+          generate_release_notes: true

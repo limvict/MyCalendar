@@ -1,0 +1,298 @@
+---
+
+## 配置说明
+
+配置文件位于系统数据目录下的 `MyCalendarApp/config.json`：
+
+| 平台 | 路径 |
+| --- | --- |
+| Windows | `%APPDATA%\MyCalendarApp\config.json` |
+| macOS | `~/Library/Application Support/MyCalendarApp/config.json` |
+| Linux | `$XDG_DATA_HOME/MyCalendarApp/config.json`（默认 `~/.local/share/...`） |
+
+同目录下还有：
+
+| 文件 | 用途 |
+| --- | --- |
+| `holiday_cache.json` | 节假日网络数据缓存（7 天过期） |
+| `calendar_log.txt` | 运行日志（轮转 5 MB × 3） |
+| `update_state.txt` | 上次更新失败的临时标记，正常时不存在 |
+
+日志目录可用环境变量 `MYCALENDAR_LOG_DIR` 覆盖。
+
+主要字段：
+
+| 字段 | 说明 | 默认 |
+| --- | --- | --- |
+| `language` | `zh_CN` / `en_US` | `zh_CN` |
+| `topmost` | 窗口置顶 | `false` |
+| `opacity` | 窗口透明度 0.0–1.0 | `0.92` |
+| `pos_x` / `pos_y` | 窗口位置记忆 | 无 |
+| `memorial_days` | 纪念日列表 | `[]` |
+| `memorial_cfg.enable_remind` | 提醒总开关 | `true` |
+| `memorial_cfg.sound_enable` | 提醒音效开关 | `true` |
+| `memorial_cfg.remind_start_hour` | 提醒时段起（**暂无 UI 入口，需手工编辑**） | `8` |
+| `memorial_cfg.remind_end_hour` | 提醒时段止（同上） | `22` |
+| `memorial_cfg.last_remind_date` | 上次提醒日期，防止同日重复弹窗 | `""` |
+| `update_skipped_version` | 用户选择"忽略此版本"后记录 | `""` |
+
+写入策略：防抖 500 ms + 临时文件 `os.replace` 原子落盘；退出时
+`config.flush()` 强制同步写，避免半写文件。
+
+---
+
+## 主题自定义
+
+编辑根目录的 `theme.json`，保存后 **300 ms 内自动重载**，
+所有已打开窗口即时刷新，无需重启。
+
+- 未在 `DEFAULT_THEME` 中的键会被忽略并记 warning；
+- 值为 `null` 的键保留默认值；
+- 完整可调项见 `constants.DEFAULT_THEME`。
+
+主要分组：
+
+| 分组 | 键举例 |
+| --- | --- |
+| 窗口 | `window_width` / `window_height` / `corner_radius` / `shadow_size` |
+| 字体 | `font_family` / `font_size` / `small_font_size` |
+| 日历单元格 | `normal_cell_bg` / `today_bg` / `select_bg` / `adjacent_cell_bg` |
+| 文字 | `normal_num_color` / `normal_lunar_color` / `festival_red` / `workday_orange` |
+| 按钮 | `btn_bg` / `btn_hover` / `btn_pressed` / `btn_text` |
+| 标记 | `dot_size` / `tag_size` / `tag_bg` / `tag_text_color` |
+
+---
+
+## 依赖降级策略
+
+程序在依赖缺失时**不崩溃**，按下列矩阵逐级降级：
+
+| 缺失项 | 降级行为 |
+| --- | --- |
+| `cnlunar` | 日历仅显示公历与公历节日；农历、节气、农历节日、除夕全部不可用；启动时弹依赖提示 |
+| `chinese_calendar` | 网络数据可用时不受影响；断网时"周末即假日"，**无法识别法定调休** |
+| 两者都缺 | 同上叠加，`info_label` 显示"农历库未安装，详情不可用" |
+| `winreg`（非 Windows） | `check_auto_start()` 恒返回 `False`；设置里勾选自启会弹"仅支持 Windows" |
+| `winsound`（非 Windows） | 音效静默跳过，提醒弹窗仍正常显示 |
+| 系统托盘不可用 | 关闭窗口 = 直接退出（而非最小化）；`tray_mgr.available` 为 `False` 时自动切换行为 |
+| `assets/app.ico` 不存在 | 托盘回退到 Qt 标准图标 |
+| `assets/alert.wav` 不存在 | 回退到系统音效 `SystemAsterisk` |
+| 所有 CDN 均失败 | 使用本地缓存 → `chinese_calendar` → 周末判断 |
+
+启动后 `dependency_check.check_dependencies` 会延迟 100 ms 弹窗提示缺失项，
+避免在窗口首次显示前打断视觉呈现。
+
+---
+
+## 打包发布
+
+### PyInstaller
+
+项目按"单文件"或"单目录"打包均可，资源路径统一走
+`config.get_resource_path()`，自动兼容 `sys._MEIPASS`。
+
+需一并打包的资源：
+
+```
+assets/app.ico        # 必需
+assets/alert.wav      # 可选
+theme.json            # 根目录
+```
+
+参考命令：
+
+```bash
+pyinstaller --noconfirm --windowed --name MyCalendar \
+  --icon assets/app.ico \
+  --add-data "assets;assets" \
+  --add-data "theme.json;." \
+  main.py
+```
+
+> Linux / macOS 下 `--add-data` 的分隔符是 `:` 而非 `;`。
+
+### 版本号一致性
+
+`updater.CURRENT_VERSION` 必须与安装包清单（`installer.iss` 的
+`AppVersion`）以及 `version.json` 的 `version` 字段三者一致。
+CI 中建议加校验脚本（`scripts/check_version.py`）。
+
+### 发布 `version.json`
+
+```json
+{
+  "version": "3.0.2",
+  "download_url": "https://example.com/MyCalendar-3.0.2.exe",
+  "sha256": "<64 位小写十六进制>",
+  "release_notes": "本次更新内容"
+}
+```
+
+- `sha256` 为**必填**。`UpdateManager._on_checked` 与
+  `download_and_apply_async` 双重拦截缺失情况，直接拒绝下载。
+- `download_url` 必须是 `http(s)` 且带 host，防止被劫持的清单
+  指向 `file://` 等本地协议。
+
+### 更新流程
+
+```
+检查 version.json
+  → 发现新版本 → 弹窗询问
+  → 下载到 %TEMP%（带进度条，可 Esc 隐藏）
+  → 校验 SHA-256
+  → 生成 bat，主程序退出
+  → bat 轮询等待进程结束（上限 60 s）
+  → 备份旧 exe 为 .old
+  → 替换为新 exe
+  → 启动新版本，探测 5 秒是否存活
+      ├─ 存活 → 删除 .old，更新成功
+      └─ 启动即崩 → 回滚 .old，写失败标记
+  → 下次启动读标记，弹窗提示「重试 / 忽略此版本」
+```
+
+失败原因分类：`backup_failed` / `install_failed` / `probe_failed` /
+`rollback_failed` / `probe_rollback_failed`。
+
+---
+
+## 常见问题
+
+**Q：农历 / 节气不显示？**
+未安装 `cnlunar`。启动时会有依赖提示，装完重启即可：
+`pip install cnlunar`。
+
+**Q：法定节假日不准 / 调休没标"班"？**
+优先用网络数据（5 个 CDN 依次重试，缓存 7 天，每 6 小时刷新）。
+断网且未装 `chinese_calendar` 时降级为"周末即假日"，无法识别调休。
+装 `chinese_calendar` 可显著改善离线表现。
+
+**Q：改了 `theme.json` 没反应？**
+确认文件在 exe 同目录（源码运行时是项目根目录），且是合法 JSON。
+编辑器的"先删后写"会被目录监视补回，但中间可能有 300 ms 防抖延迟。
+仍无反应请查日志。
+
+**Q：窗口找不到了？**
+系统托盘不可用时，关闭窗口会直接退出而非最小化；此时应用
+`tray_mgr.available` 为 `False`，主窗口关闭行为已切换为退出。
+若托盘可用，双击托盘图标恢复窗口。
+
+**Q：开机自启设置失败？**
+仅 Windows 支持。注册表 `HKCU\...\Run` 权限不足时请以管理员身份
+运行一次。企业策略或精简系统可能裁剪该注册表路径，此时会给出
+"注册表路径不存在"的明确提示。
+
+**Q：怎么改提醒时段？**
+目前**没有 UI 入口**，需手工编辑 `config.json` 的
+`memorial_cfg.remind_start_hour` / `remind_end_hour`（0–23），
+改完重启。默认 `8`–`22`。
+
+**Q：想彻底退出而不是最小化到托盘？**
+托盘菜单或右键菜单选"完全退出"，或在设置里关闭托盘（若系统支持）。
+
+**Q：更新失败了怎么办？**
+下次启动会弹窗说明失败原因与日志路径，可选"重试"或"忽略此版本"。
+忽略后该版本不再提示，直到出现更高版本。日志在
+`%TEMP%\DLC_update_<pid>.log`。
+
+---
+
+## API 参考
+
+### `config`
+
+```python
+from config import config, get_logger, get_resource_path
+
+config.get("language")                       # 标量直接返回，容器返回深拷贝
+config.get_nested("memorial_cfg", "enable_remind", default=True)
+config.snapshot()                            # 深拷贝整个配置
+config.replace_all(new_cfg, save=False)      # 整体替换，锁内迁移
+config.set("topmost", True, save=True)       # save=True 走防抖落盘
+config.flush()                               # 立即同步落盘
+```
+
+单例，线程安全（`RLock`）。`get` / `get_nested` 返回的容器是副本，
+标量是不可变值，均可安全持有。
+
+### `event_bus`
+
+```python
+from event_bus import event_bus, EventType
+
+event_bus.subscribe(EventType.MEMORIAL_CHANGED, on_changed)
+event_bus.publish(EventType.MEMORIAL_CHANGED, check_today=True)
+event_bus.unsubscribe(EventType.MEMORIAL_CHANGED, on_changed)
+event_bus.clear_all()      # 测试隔离用
+```
+
+`EventType` 常量见 `event_bus.py`：节假日 / 纪念日 / 窗口 / 设置 /
+更新四组。订阅幂等，单个订阅者抛异常不影响其余订阅者。
+
+### `i18n`
+
+```python
+from i18n import tr, set_language, on_language_changed, validate_keys
+
+tr("cal.title_format", year=2026, month=10)  # 三级回退：当前 → zh_CN → key
+set_language("en_US")                        # 触发所有已注册监听者
+validate_keys(strict=True)                   # CI 用；含占位符一致性检查
+```
+
+### `lunar`
+
+```python
+import lunar
+
+lunar.HAS_CNLUNAR            # cnlunar 是否可用
+lunar.HAS_CHINESE_CAL        # chinese_calendar 是否可用
+lunar.get_lunar_by_datetime((2026, 10, 16))  # 返回 cnlunar.Lunar 或 None
+lunar.lunar_to_gregorian(2026, 8, 15, is_leap_month=False)
+lunar.clear_lunar_caches()   # 测试中 monkeypatch HAS_CNLUNAR 后调用
+lunar.warmup_lunar_index([2026, 2027])       # 预热索引，避免首次翻页卡顿
+```
+
+`get_lunar_by_datetime` 带 `lru_cache(4096)`；入口处检查
+`HAS_CNLUNAR`，因此 monkeypatch 后无需清缓存即可生效。
+
+### `app.info_panel`（纯函数，可单测）
+
+```python
+from app.info_panel import build_info_parts, render_html, placeholder_key
+
+parts = build_info_parts(
+    sel_date=qdate,
+    memorial_names=["生日"],
+    lunar_obj=lunar.get_lunar_by_datetime((2026, 10, 16)),
+    has_cnlunar=lunar.HAS_CNLUNAR,
+)
+html = render_html(parts, theme=theme)   # 无内容时返回 None
+key = placeholder_key(parts)             # "info.no_events" 等
+```
+
+不接触任何 Qt 控件，不 import `lunar` 模块（由调用方传入），
+测试时可用 stub 绕过全局状态。
+
+### `memorial`（纯函数）
+
+```python
+from memorial import normalize_memorial, match_memorial_date, get_next_memorial_date
+
+normalize_memorial(mem)                       # 脏数据收敛，返回新 dict
+match_memorial_date(mem, qdate, normalized=False)
+get_next_memorial_date(mem, base_date, include_base=False, normalized=False)
+```
+
+`normalized=True` 可跳过重复归一化。调度循环内先归一化全表一次、
+循环里传 `normalized=True` 是推荐用法。
+
+### `app.settings_controller`
+
+```python
+from app import settings_controller
+
+settings_controller.open_settings_dialog(window)   # 打开对话框，处理预览与取消还原
+settings_controller.apply_settings(window, dlg)    # 确定后写回
+```
+
+不持有全局管理器引用，只通过传入的 `window` 访问状态，便于测试时
+替换 stub。

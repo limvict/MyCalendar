@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test on Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.14"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          # 依赖清单唯一来源是 pyproject.toml；pyproject.toml 变更
+          # 会正确触发缓存刷新。
+          cache-dependency-path: pyproject.toml
+
+      # ---- 快速失败层：纯文件检查，不装任何第三方包 ----
+      - name: Check file encodings are UTF-8
+        if: runner.os == 'Linux'
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+
+          # 只查文本源文件；release/、dist/、PyInstaller 中间产物、缓存目录跳过
+          suffixes = {".py", ".ini", ".toml", ".cfg", ".json",
+            ".yml", ".yaml", ".iss", ".isl", ".spec",
+            ".txt", ".md"}
+          exclude_parts = {
+              ".git", "release", "dist", ".venv", "venv", "env",
+              "__pycache__", ".mypy_cache", ".ruff_cache",
+              ".pytest_cache", "htmlcov", "node_modules",
+          }
+          exclude_prefix = (
+              "build/app/", "build/lib/", "build/DesktopCalendar/",
+          )
+
+          bad = []
+          for p in pathlib.Path(".").rglob("*"):
+              if not p.is_file() or p.suffix not in suffixes:
+                  continue
+              if any(part in exclude_parts for part in p.parts):
+                  continue
+              posix = p.as_posix()
+              if any(posix.startswith(pre) for pre in exclude_prefix):
+                  continue
+              try:
+                  p.read_bytes().decode("utf-8")
+              except UnicodeDecodeError as e:
+                  bad.append(f"{p}: {e}")
+
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("encoding check ok")
+          PY
+
+      - name: Check version consistency
+        if: runner.os == 'Linux'
+        run: python scripts/check_version.py
+
+      # check_i18n.py 只依赖 config 层（纯数据）+ 标准库，不装第三方包
+      # 即可运行；PYTHONPATH=src 让 desktop_calendar 可导入。
+      # 若未来 config 层意外引入第三方依赖，需把本步骤移到
+      # "Install dependencies" 之后。
+      - name: Check i18n keys
+        if: runner.os == 'Linux'
+        env:
+          PYTHONPATH: src
+        run: python scripts/check_i18n.py
+
+      # ---- 依赖安装 ----
+      - name: Install system dependencies (Linux Qt libs)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-keysyms1 libxcb-shape0
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,build]"
+
+      # ---- 契约检查 ----
+      # 读取 pyproject.toml [tool.importlinter]，校验分层依赖 /
+      # forbidden 契约。editable install 已让 lint-imports 能 import
+      # desktop_calendar，无需额外 PYTHONPATH。
+      - name: Check import contracts
+        if: runner.os == 'Linux'
+        run: lint-imports
+
+      # ---- 测试 ----
+      - name: Run tests
+        run: pytest -v --tb=short --durations=10
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
