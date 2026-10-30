@@ -43,11 +43,11 @@ jobs:
       # 版本来源：
       #   push tag    → 从 GITHUB_REF_NAME 剥前缀 v
       #   workflow_dispatch → 从 inputs.version（预演用）
-      # 正式版必须严格 X.Y.Z；带后缀（如 3.0.3-beta.1）视为 prerelease，
-      # 不会进入 /releases/latest 通道，用户更新器不会拉到。
-      #
-      # 注意：scripts/_version.py 的 validate_ver 当前只认 X.Y.Z，
-      # 若确实要发 prerelease，需同步放宽该正则；否则先只用正式版。
+      # 正式版必须严格 X.Y.Z。带后缀（如 3.0.3-beta.1）当前不支持：
+      # scripts/_version.py 的 validate_ver 只认 X.Y.Z，这里同步收紧，
+      # 让不支持的 tag 在本步骤就明确失败，而不是等到 patch 步骤
+      # 才报格式错误。若将来要发 prerelease，需同时放宽 validate_ver
+      # 与运行时 _parse_version 的比较规则。
       - name: Resolve version
         id: ver
         shell: bash
@@ -57,16 +57,11 @@ jobs:
           else
             TAG="${GITHUB_REF_NAME#v}"
           fi
-          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::Version must be X.Y.Z or X.Y.Z-suffix (got: $TAG)"
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be X.Y.Z (got: $TAG). Prerelease suffixes are not supported yet."
             exit 1
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
-          if [[ "$TAG" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
 
       # 1) 版本注入：pyproject.toml + update_manager.py + installer.iss
       #    + build/version_info.txt（app.spec 的 exe 版本资源）
@@ -122,15 +117,23 @@ jobs:
           }
           Write-Host "OK: $($setup.Name) ($($setup.Length) bytes)"
 
-      # 4) manifest 由脚本生成，schema 唯一来源
+      # 4) manifest 由脚本生成，schema 唯一来源。
+      #    DOWNLOAD_MIRROR_BASE_URLS 让 version.json 同时写
+      #    download_url_mirror（旧客户端）和 download_url_mirrors（新客户端）。
+      #    镜像顺序即运行时 fallback 顺序：先试 ghproxy.net，再 mirror，
+      #    再 gh-proxy，最后 GitHub 直链兜底。
+      #    用 ${{ github.repository }} 而非硬编码，fork / 改仓库名自动跟随。
       - name: Generate update manifest
         shell: bash
         env:
           VER: ${{ steps.ver.outputs.version }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DOWNLOAD_MIRROR_BASE_URLS: "https://ghproxy.net/https://github.com/${{ github.repository }}/releases/download/v{ver},https://mirror.ghproxy.com/https://github.com/${{ github.repository }}/releases/download/v{ver},https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download/v{ver}"
         run: python scripts/patch_updater.py --manifest
 
-      # 5) 构建后一致性检查：manifest 已存在，强制校验
+      # 5) 构建后一致性检查：manifest 已存在，强制校验。
+      #    同时校验 download_url / download_url_mirror / download_url_mirrors
+      #    都是 https + 非空 host，与运行时 _is_safe_download_url 同构。
       - name: Verify version + manifest + sha256
         shell: bash
         env:
@@ -138,11 +141,11 @@ jobs:
         run: python scripts/check_version.py --manifest-required --verify-sha256
 
       # 仅在 push tag 时发布；workflow_dispatch 视作预演，不创建 Release。
-      # prerelease 由版本号后缀决定，见上方 Resolve version。
+      # 对已存在的同名 tag release，本 action 会更新其资产（覆盖手动上传的
+      # exe / manifest）。手动重建 release 后若不想被覆盖，不要重复 push 同一 tag。
       - uses: softprops/action-gh-release@v2
         if: github.event_name == 'push'
         with:
-          prerelease: ${{ steps.ver.outputs.prerelease == 'true' }}
           files: |
             release/DesktopCalendar.exe
             release/version.json
