@@ -27,7 +27,7 @@ logger = get_logger()
 
 UPDATE_MANIFEST_URL = (
     "https://github.com/limvict/MyCalendar/releases/latest/download/version.json")
-CURRENT_VERSION = "3.0.6"
+CURRENT_VERSION = "3.0.3"
 
 CHECK_TIMEOUT = 10
 DOWNLOAD_TIMEOUT = 120

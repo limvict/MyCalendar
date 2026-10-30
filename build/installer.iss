@@ -8,7 +8,7 @@
 ;   - 本文件 #define MyAppVersion
 
 #define MyAppName "桌面日历"
-#define MyAppVersion "3.0.6"
+#define MyAppVersion "3.0.3"
 ; 发布者名会显示在"应用和功能"列表，部署前请替换为真实名称
 #define MyAppPublisher "limvict"
 #define MyAppExeName "DesktopCalendar.exe"
