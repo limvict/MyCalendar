@@ -1,0 +1,100 @@
+# coding: utf-8
+"""共享 fixture：路径隔离、ConfigManager 单例重置、语言重置。"""
+from __future__ import annotations
+
+import tempfile
+
+import pytest
+
+from desktop_calendar.config import manager as mgr_module
+from desktop_calendar.config import i18n
+from desktop_calendar.infrastructure.network import update_bat
+
+
+@pytest.fixture
+def isolated_paths(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.json"
+    hc_path = tmp_path / "holiday_cache.json"
+    state_path = tmp_path / "update_state.txt"
+
+    monkeypatch.setattr(mgr_module, "get_config_path", lambda: str(cfg_path))
+    monkeypatch.setattr(mgr_module, "get_holiday_cache_path",
+                        lambda: str(hc_path))
+
+    monkeypatch.setattr(update_bat, "get_config_path",
+                        lambda: str(cfg_path))
+    monkeypatch.setattr(update_bat, "_state_file_path",
+                        lambda: str(state_path))
+    from desktop_calendar.infrastructure.network import update_manager
+    monkeypatch.setattr(update_manager, "_state_file_path",
+                        lambda: str(state_path))
+
+    return tmp_path, cfg_path, hc_path
+
+
+@pytest.fixture
+def fresh_config_manager(isolated_paths):
+    """构造一个独立的 ConfigManager 实例。
+
+    重置类级别 _instance，避免与模块导入时已构造的 config 单例混淆。
+    """
+    old = mgr_module.ConfigManager._instance
+    mgr_module.ConfigManager._instance = None
+    try:
+        yield mgr_module.ConfigManager()
+    finally:
+        mgr_module.ConfigManager._instance = old
+
+
+@pytest.fixture
+def tmp_tmpdir(tmp_path, monkeypatch):
+    """把 tempfile.gettempdir 重定向到 tmp_path/tmp。
+
+    供 update_bat 的清理函数测试使用（避免触碰真实系统临时目录）。
+    需要同时替换标准库 tempfile 与 update_bat 中已绑定的别名。
+    """
+    tdir = tmp_path / "tmp"
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    def _fake_gettempdir():
+        return str(tdir)
+
+    monkeypatch.setattr(tempfile, "gettempdir", _fake_gettempdir)
+    monkeypatch.setattr(
+        update_bat.tempfile, "gettempdir", _fake_gettempdir)
+    return tdir
+
+
+@pytest.fixture(autouse=True)
+def reset_i18n():
+    """每个测试前后都恢复到 zh_CN，防止用例间相互污染。"""
+    old_lang = i18n.get_language()
+    i18n.set_language("zh_CN")
+    yield
+    try:
+        i18n.set_language(old_lang)
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def app_logger_propagate():
+    import logging
+    logger = logging.getLogger("MyCalendarApp")
+    old = logger.propagate
+    logger.propagate = True
+    try:
+        yield logger
+    finally:
+        logger.propagate = old
+
+@pytest.fixture
+def opacity_quantized():
+    """Qt windowOpacity 8-bit alpha 量化的容差断言。
+
+    用法：
+        assert w.windowOpacity() == opacity_quantized(0.92)
+    """
+    def _approx(target: float):
+        return pytest.approx(target, abs=1.0 / 255.0 + 1e-9)
+    return _approx
