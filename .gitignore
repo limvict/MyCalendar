@@ -1,0 +1,65 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+/.venv/
+/venv/
+/env/
+*.whl
+*.tar.gz
+
+# ---------- pytest / coverage ----------
+.pytest_cache/
+.pytest_tmp/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---------- 类型检查 / lint 缓存 ----------
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+.tox/
+.nox/
+
+# ---------- PyInstaller / build ----------
+/build/app/
+/build/lib/
+/build/DesktopCalendar/
+# patch_updater.py --version-info 生成
+/build/version_info.txt
+/dist/
+# 发布物：安装包 + version.json
+/release/
+*.spec.bak
+
+# ---------- 二进制产物（防御性：release/ 已整体忽略）----------
+*.exe
+*.msi
+*.dmg
+*.pkg
+
+# ---------- 归档 ----------
+*.rar
+*.7z
+
+# ---------- 本地开发配置 ----------
+src/desktop_calendar/config/config.json
+
+# ---------- root temp files ----------
+/tmp_v.json
+
+# ---------- IDE / OS ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---------- secrets / logs ----------
+.env
+.env.*
+!.env.example
+*.log

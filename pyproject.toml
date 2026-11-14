@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "desktop-calendar"
+version = "3.0.3"
+description = "桌面日历（DesktopCalendar）"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PyQt6>=6.6,<7",
+    "cnlunar>=0.2,<1",
+    "chinesecalendar>=1.10,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4",
+    "import-linter>=2",
+]
+build = [
+    "pyinstaller>=6.0,<7",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.importlinter]
+root_package = "desktop_calendar"
+
+[[tool.importlinter.contracts]]
+name = "分层依赖（自上而下）"
+type = "layers"
+layers = [
+    "desktop_calendar.__main__",
+    "desktop_calendar.ui",
+    "desktop_calendar.core | desktop_calendar.infrastructure",
+    "desktop_calendar.contracts",
+    "desktop_calendar.config",
+    "desktop_calendar.utils",
+]
+
+[[tool.importlinter.contracts]]
+name = "holiday_manager 不得依赖 Qt 网络实现"
+type = "forbidden"
+source_modules = ["desktop_calendar.core.holiday_manager"]
+forbidden_modules = ["desktop_calendar.infrastructure.network"]
+
+[[tool.importlinter.contracts]]
+name = "contracts.event_bus 必须零业务依赖（仅允许 utils）"
+type = "forbidden"
+source_modules = ["desktop_calendar.contracts.event_bus"]
+forbidden_modules = [
+    "desktop_calendar.ui",
+    "desktop_calendar.core",
+    "desktop_calendar.infrastructure",
+    "desktop_calendar.config",
+    "desktop_calendar.__main__",
+]
+
+[[tool.importlinter.contracts]]
+name = "core.memorial 不得依赖 i18n"
+type = "forbidden"
+source_modules = ["desktop_calendar.core.memorial"]
+forbidden_modules = ["desktop_calendar.config.i18n"]
+
+# 注：core.reminder_manager 依赖 config.i18n 是刻意的——提醒文案
+# （_format_hit_text）需要随语言切换，且该模块在 UI 线程被同步调用，
+# 移到 ui 层会增加一次跨层数据传递。若未来要彻底分层，把
+# _format_hit_text 移到 ui/controllers，并把本契约扩展为
+# source_modules = ["desktop_calendar.core"]。
+
+[[tool.importlinter.contracts]]
+name = "ui.calendar_widget 不得直接依赖 core 业务模块"
+type = "forbidden"
+source_modules = ["desktop_calendar.ui.calendar_widget"]
+forbidden_modules = [
+    "desktop_calendar.core.lunar",
+    "desktop_calendar.core.memorial",
+]
+# allow_indirect_imports：calendar_widget 通过 cell_presenter 间接使用
+# core，这是有意的隔离层。直接 import 仍会被本契约拦截。
+allow_indirect_imports = true
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+qt_api = "pyqt6"
+addopts = "-ra"
