@@ -1,0 +1,138 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  # 手动触发仅构建 + 全链路校验，不发布 Release。
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Dry-run version (e.g. 3.0.3). No release will be published."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      # 版本来源：push tag 剥 v 前缀；workflow_dispatch 用 inputs.version。
+      # 严格 X.Y.Z：validate_ver、_SAFE_VERSION_RE、_is_newer 三处契约一致。
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.version }}"
+          else
+            TAG="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be X.Y.Z (got: $TAG). Prerelease suffixes are not supported."
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Patch version sources + version_info
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: python scripts/patch_updater.py --version-info
+
+      - name: Verify version sources
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: python scripts/check_version.py
+
+      - name: Build exe (PyInstaller onefile)
+        run: python -m PyInstaller --noconfirm --clean --distpath release build/app.spec
+
+      - name: Verify single-file exe
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+
+          p = pathlib.Path("release/DesktopCalendar.exe")
+          if not p.exists():
+              print(f"::error::Expected single-file exe at {p}", file=sys.stderr)
+              sys.exit(1)
+          size = p.stat().st_size
+          if size < 1_000_000:
+              print(f"::error::exe too small: {size} bytes", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: {p} = {size} bytes")
+          PY
+
+      # 显式 pin Inno 6.3.3，防止 choco 上游切 Inno 7 后路径/行为变化。
+      # ISCC 查找与 scripts/build.py 的 _find_iscc 候选列表对齐。
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.3.3 -y --no-progress
+
+          $iscc = $null
+          foreach ($p in @(
+              (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source,
+              "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+              "C:\Program Files\Inno Setup 6\ISCC.exe"
+          )) {
+              if ($p -and (Test-Path $p)) { $iscc = $p; break }
+          }
+          if (-not $iscc) {
+              Write-Error "找不到 ISCC.exe（PATH / Program Files 均无）"
+              exit 1
+          }
+          Write-Host "Using ISCC: $iscc"
+          & $iscc build\installer.iss
+
+          $setup = Get-ChildItem release/DesktopCalendar_Setup_*.exe -ErrorAction SilentlyContinue
+          if (-not $setup) {
+            Write-Error "Inno Setup did not produce release/DesktopCalendar_Setup_*.exe"
+            Get-ChildItem release/ | Format-Table
+            exit 1
+          }
+          Write-Host "OK: $($setup.Name) ($($setup.Length) bytes)"
+
+      # manifest 由脚本生成，schema 唯一来源；sha256 / download_url 指向安装包。
+      # 镜像顺序即运行时 fallback 顺序。
+      - name: Generate update manifest
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DOWNLOAD_MIRROR_BASE_URLS: "https://ghproxy.net/https://github.com/${{ github.repository }}/releases/download/v{ver},https://mirror.ghproxy.com/https://github.com/${{ github.repository }}/releases/download/v{ver},https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download/v{ver}"
+        run: python scripts/patch_updater.py --manifest
+
+      - name: Verify version + manifest + sha256
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: python scripts/check_version.py --manifest-required --verify-sha256
+
+      # 仅在 push tag 时发布；只上传安装包与 manifest（裸 exe 不上传）。
+      - uses: softprops/action-gh-release@v2
+        if: github.event_name == 'push'
+        with:
+          files: |
+            release/DesktopCalendar_Setup_*.exe
+            release/version.json
+          generate_release_notes: true
