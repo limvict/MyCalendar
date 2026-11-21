@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -305,10 +306,46 @@ class MainWindowLayoutMixin:
         self._sidebar_layout.addWidget(self.sidebar_services_widget)
         self._sidebar_layout.addWidget(self.sidebar_attendance_title)
         self._sidebar_layout.addWidget(self.attendance_status_label)
-        self.btn_attendance = QPushButton(tr("btn.attendance"))
-        self.btn_attendance.clicked.connect(self.open_attendance_menu)
-        self._sidebar_buttons = [self.btn_attendance]
-        self._sidebar_layout.addWidget(self.btn_attendance)
+
+        # 上班 / 下班拆成两个按钮：各自独立可用状态，避免"下一步该点哪个"的猜测
+        punch_row = QHBoxLayout()
+        self._punch_row = punch_row
+        punch_row.setContentsMargins(0, 0, 0, 0)
+        punch_row.setSpacing(LAYOUT["row_spacing"])
+        self.btn_punch_in = QPushButton(tr("attendance.punch_in"))
+        self.btn_punch_in.setObjectName("attendance_punch")
+        self.btn_punch_in.setAccessibleName(tr("attendance.punch_in"))
+        self.btn_punch_in.clicked.connect(lambda: self._do_punch("in"))
+        self.btn_punch_out = QPushButton(tr("attendance.punch_out"))
+        self.btn_punch_out.setObjectName("attendance_punch")
+        self.btn_punch_out.setAccessibleName(tr("attendance.punch_out"))
+        self.btn_punch_out.clicked.connect(lambda: self._do_punch("out"))
+        # 两个按钮等宽：Ignored 让布局忽略文本长度差异，按 stretch 均分
+        for button in (self.btn_punch_in, self.btn_punch_out):
+            button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        punch_row.addWidget(self.btn_punch_in, stretch=1)
+        punch_row.addWidget(self.btn_punch_out, stretch=1)
+        self._sidebar_layout.addLayout(punch_row)
+
+        # 统计行：本周出勤摘要 + 「统计」入口（打开考勤统计对话框）
+        stats_row = QHBoxLayout()
+        self._stats_row = stats_row
+        stats_row.setContentsMargins(0, 0, 0, 0)
+        stats_row.setSpacing(LAYOUT["row_spacing"])
+        self.attendance_summary_label = QLabel()
+        self.attendance_summary_label.setObjectName("attendance_summary")
+        self.btn_attendance_stats = QPushButton(tr("attendance.stats"))
+        self.btn_attendance_stats.setObjectName("attendance_stats")
+        self.btn_attendance_stats.setAccessibleName(tr("attendance.stats"))
+        self.btn_attendance_stats.setFlat(True)
+        self.btn_attendance_stats.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_attendance_stats.setToolTip(tr("attendance.stats_tip"))
+        self.btn_attendance_stats.clicked.connect(lambda: self.open_attendance_dialog("week"))
+        stats_row.addWidget(self.attendance_summary_label, stretch=1)
+        stats_row.addWidget(self.btn_attendance_stats)
+        self._sidebar_layout.addLayout(stats_row)
+
+        self._sidebar_buttons = [self.btn_punch_in, self.btn_punch_out]
         self._sidebar_layout.addWidget(self.sidebar_focus_title)
         self._sidebar_layout.addWidget(self.focus_status_label)
         self._update_focus_label()
@@ -347,10 +384,10 @@ class MainWindowLayoutMixin:
         self._setup_shortcuts()
         self._refresh_styles(b)
         self._sync_row_heights()
-        self._update_attendance_button()
+        self._update_attendance_ui()
         self._attendance_status_timer = QTimer(self)
         self._attendance_status_timer.setInterval(60_000)
-        self._attendance_status_timer.timeout.connect(self._update_attendance_button)
+        self._attendance_status_timer.timeout.connect(self._update_attendance_ui)
         self._attendance_status_timer.start()
         self._update_mood_button()
         self._refresh_schedule_ui()

@@ -168,6 +168,8 @@ class QssSet:
     sidebar_status: str
     sidebar_title: str
     sidebar_subtitle: str
+    attendance_punch: str
+    attendance_stats: str
     info_label: str
     menu: str
     message_info: str

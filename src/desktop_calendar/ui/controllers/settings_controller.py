@@ -154,7 +154,7 @@ def apply_settings(window, dlg: SettingDialog) -> None:
             manager.reschedule()
         except Exception:
             logger.exception("设置变更后重排%s失败", name)
-    window._update_attendance_button()
+    window._update_attendance_ui()
     window.theme_mgr.set_auto_theme_enabled(new_cfg["theme_auto_enabled"])
     window.set_calendar_wallpaper(
         new_cfg["calendar_wallpaper"], new_cfg["calendar_wallpaper_overlay"]

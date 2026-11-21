@@ -47,6 +47,8 @@ from .shell import (
     tooltip,
 )
 from .sidebar import (
+    attendance_punch_button,
+    attendance_stats_link,
     sidebar_action_button,
     sidebar_close_button,
     sidebar_panel,
@@ -85,6 +87,8 @@ __all__ = [
     "sidebar_status_card",
     "sidebar_title",
     "sidebar_subtitle",
+    "attendance_punch_button",
+    "attendance_stats_link",
     # 面板
     "schedule_panel",
     "sidebar_services",

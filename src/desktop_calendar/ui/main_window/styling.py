@@ -48,6 +48,11 @@ class MainWindowStylingMixin:
         self.header_sep.setStyleSheet(b.qss.header_separator)
         for button in self._sidebar_buttons:
             button.setStyleSheet(b.qss.sidebar_action)
+        # 打卡双按钮用居中样式，覆盖上面「常用」网格的左对齐样式
+        for button in (self.btn_punch_in, self.btn_punch_out):
+            button.setStyleSheet(b.qss.attendance_punch)
+        self.btn_attendance_stats.setStyleSheet(b.qss.attendance_stats)
+        self.attendance_summary_label.setStyleSheet(b.qss.sidebar_subtitle)
         for label in (
             self.sidebar_weather_title,
             self.sidebar_attendance_title,

@@ -1,5 +1,5 @@
 # coding: utf-8
-"""考勤交互：状态文案、打卡菜单、写入与自动打卡反馈。"""
+"""考勤交互：状态卡、上/下班双按钮、本周统计与自动打卡反馈。"""
 
 from __future__ import annotations
 
@@ -7,10 +7,7 @@ import logging
 from datetime import datetime
 
 from PyQt6.QtCore import QDate
-from PyQt6.QtWidgets import (
-    QMenu,
-    QToolTip,
-)
+from PyQt6.QtWidgets import QToolTip
 
 from desktop_calendar.config.i18n import tr
 from desktop_calendar.config.manager import config
@@ -31,20 +28,22 @@ logger = logging.getLogger(APP_LOGGER_NAME)
 
 
 class MainWindowAttendanceMixin:
-    """考勤交互：状态文案、打卡菜单、写入与自动打卡反馈。"""
+    """考勤交互：状态卡、上/下班双按钮、本周统计与自动打卡反馈。"""
 
+    # ---------- 自动打卡反馈 ----------
     def _on_auto_punched(self, action: str, punched_at: str) -> None:
-        self._update_attendance_button()
+        self._update_attendance_ui()
         self.attendance_reminder.notify_punched(action)
         key = "attendance.auto_punch_in" if action == "in" else "attendance.auto_punch_out"
         message = tr(key).format(time=punched_at)
         if self.tray_mgr.show_message(tr("btn.attendance"), message):
             return
+        anchor = self.btn_punch_in if action == "in" else self.btn_punch_out
         if self.isVisible():
             QToolTip.showText(
-                self.btn_attendance.mapToGlobal(self.btn_attendance.rect().center()),
+                anchor.mapToGlobal(anchor.rect().center()),
                 message,
-                self.btn_attendance,
+                anchor,
             )
         else:
             logger.info("%s", message)
@@ -57,62 +56,104 @@ class MainWindowAttendanceMixin:
         if self.isVisible():
             msg_error(self, tr("msg.error"), message)
 
-    def open_attendance_menu(self):
-        try:
-            rec = self.attendance_store.get_record(QDate.currentDate().toPyDate())
-        except Exception:
-            logger.exception("读取今日考勤记录失败，按未打卡处理")
-            rec = {}
+    # ---------- 按钮状态 ----------
+    @staticmethod
+    def _punch_states(rec: dict, now: datetime) -> tuple[dict, dict]:
+        """返回 (上班按钮, 下班按钮) 的文案 / 可用状态 / tooltip。
 
+        纯函数：不读控件，便于单测。规则与 AttendanceStore 保持一致：
+        - 上班卡：未打过且在 11:00 前可用；已打过或过期 → 禁用；
+        - 下班卡：打过上班卡（或已过上班卡截止时间，允许只记下班）可用；
+          已打过下班卡时按钮变为「更新下班」。
+        """
         in_time = rec.get("in")
         out_time = rec.get("out")
-        allow_punch_in = datetime.now().hour < PUNCH_IN_DEADLINE_HOUR
+        allow_in = now.hour < PUNCH_IN_DEADLINE_HOUR
+        deadline = f"{PUNCH_IN_DEADLINE_HOUR:02d}:00"
 
-        menu = QMenu(self)
-        act_main = act_week = act_month = None
-        chosen = None
-        try:
-            menu.setStyleSheet(self.theme_mgr.current.qss.menu)
-            head = menu.addAction(self._attendance_status_text(rec))
-            head.setEnabled(False)
-            menu.addSeparator()
+        if in_time:
+            punch_in = {
+                "text": tr("attendance.punch_in_done_btn").format(time=in_time),
+                "enabled": False,
+                "tip": tr("attendance.punch_in_done_tip").format(time=in_time),
+            }
+        elif allow_in:
+            punch_in = {
+                "text": tr("attendance.punch_in"),
+                "enabled": True,
+                "tip": tr("attendance.punch_in_tip").format(deadline=deadline),
+            }
+        else:
+            punch_in = {
+                "text": tr("attendance.punch_in"),
+                "enabled": False,
+                "tip": tr("attendance.punch_in_expired_tip").format(deadline=deadline),
+            }
 
-            if out_time:
-                update_text = tr("attendance.punch_out_update_action")
-                if update_text.startswith("attendance."):
-                    update_text = tr("attendance.punch_out")
-                act_main = menu.addAction(update_text)
-            elif in_time:
-                act_main = menu.addAction(tr("attendance.punch_out"))
-            elif allow_punch_in:
-                act_main = menu.addAction(tr("attendance.punch_in"))
-            else:
-                act_main = menu.addAction(tr("attendance.punch_out"))
+        can_punch_out = bool(in_time) or not allow_in
+        if out_time:
+            punch_out = {
+                "text": tr("attendance.punch_out_update_short"),
+                "enabled": can_punch_out,
+                "tip": tr("attendance.punch_out_update_tip").format(time=out_time),
+            }
+        else:
+            punch_out = {
+                "text": tr("attendance.punch_out"),
+                "enabled": can_punch_out,
+                "tip": (
+                    tr("attendance.punch_out_tip")
+                    if can_punch_out
+                    else tr("attendance.punch_out_need_in_tip")
+                ),
+            }
 
-            menu.addSeparator()
-            act_week = menu.addAction(tr("attendance.stats_week"))
-            act_month = menu.addAction(tr("attendance.stats_month"))
-            chosen = menu.exec(
-                self.btn_attendance.mapToGlobal(self.btn_attendance.rect().bottomLeft())
+        return punch_in, punch_out
+
+    def _update_attendance_ui(self) -> None:
+        """刷新状态卡、两个按钮与本周统计摘要（每分钟 + 打卡后调用）。"""
+        rec = self.attendance_store.get_record(QDate.currentDate().toPyDate())
+        status = self._attendance_status_text(rec)
+
+        punch_in, punch_out = self._punch_states(rec, datetime.now())
+        for button, state in ((self.btn_punch_in, punch_in), (self.btn_punch_out, punch_out)):
+            button.setText(state["text"])
+            button.setEnabled(state["enabled"])
+            button.setToolTip(state["tip"])
+
+        auto_enabled = config.get_nested("attendance_cfg", "enable_auto_punch", default=False)
+        auto_status = tr(
+            "attendance.sidebar_auto_on" if auto_enabled else "attendance.sidebar_auto_off"
+        )
+        text = "\n".join(
+            (
+                tr("attendance.sidebar_in").format(time=rec.get("in") or tr("attendance.none")),
+                tr("attendance.sidebar_out").format(time=rec.get("out") or tr("attendance.none")),
+                auto_status,
             )
-        finally:
-            menu.deleteLater()
+        )
+        self.attendance_status_label.setText(text)
+        self.attendance_status_label.setToolTip(status)
 
-        if chosen is not None and chosen is act_main:
-            if out_time:
-                if self._confirm_overwrite(out_time):
-                    self._do_punch("out")
-            elif in_time:
-                self._do_punch("out")
-            elif allow_punch_in:
-                self._do_punch("in")
-            else:
-                self._do_punch("out")
-        elif chosen is not None and chosen is act_week:
-            self.open_attendance_dialog("week")
-        elif chosen is not None and chosen is act_month:
-            self.open_attendance_dialog("month")
+        self.attendance_summary_label.setText(self._attendance_summary_text())
 
+    def _attendance_summary_text(self) -> str:
+        """本周出勤摘要，例如「本周 3 天 · 24.5h」；无记录时给占位文案。"""
+        try:
+            summary = self.attendance_store.week_summary(QDate.currentDate().toPyDate())
+        except Exception:
+            logger.exception("读取本周考勤统计失败")
+            return tr("attendance.sidebar_week_empty")
+        # 天数按「有打卡记录」计：只打了上班卡也算今天已打卡，工时此时为 0 不显示
+        days = sum(1 for day in summary.days if day.in_time or day.out_time)
+        if not days:
+            return tr("attendance.sidebar_week_empty")
+        if not summary.total_minutes:
+            return tr("attendance.sidebar_week_days").format(days=days)
+        hours = f"{summary.total_minutes / 60:.2f}".rstrip("0").rstrip(".")
+        return tr("attendance.sidebar_week_summary").format(days=days, hours=hours)
+
+    # ---------- 打卡 ----------
     @staticmethod
     def _punch_deadline_str() -> str:
         return f"{PUNCH_IN_DEADLINE_HOUR:02d}:00"
@@ -135,6 +176,8 @@ class MainWindowAttendanceMixin:
             return False
 
     def _do_punch(self, action: str) -> None:
+        """执行一次打卡。action: "in" / "out"。"""
+        anchor = self.btn_punch_in if action == "in" else self.btn_punch_out
         now = datetime.now()
 
         if action == "in":
@@ -143,21 +186,27 @@ class MainWindowAttendanceMixin:
             if old_in:
                 logger.warning("上班卡已打过，拒绝重复打卡")
                 QToolTip.showText(
-                    self.btn_attendance.mapToGlobal(self.btn_attendance.rect().center()),
+                    anchor.mapToGlobal(anchor.rect().center()),
                     _tr_fmt(
                         "attendance.punch_in_done_label", f"上班打卡（已 {old_in}）", time=old_in
                     ),
-                    self.btn_attendance,
+                    anchor,
                 )
                 return
 
             if now.hour >= PUNCH_IN_DEADLINE_HOUR:
                 logger.warning("上班打卡已过截止时间，拒绝写入")
                 QToolTip.showText(
-                    self.btn_attendance.mapToGlobal(self.btn_attendance.rect().center()),
+                    anchor.mapToGlobal(anchor.rect().center()),
                     tr("attendance.punch_in_expired").format(deadline=self._punch_deadline_str()),
-                    self.btn_attendance,
+                    anchor,
                 )
+                return
+        else:
+            # 已有下班卡：更新前先确认，避免误触改掉时间
+            rec = self.attendance_store.get_record(now.date())
+            old_out = rec.get("out")
+            if old_out and not self._confirm_overwrite(old_out):
                 return
 
         try:
@@ -171,18 +220,14 @@ class MainWindowAttendanceMixin:
                 tip = _tr_fmt("attendance.punch_in_done_label", f"上班打卡（已 {cur}）", time=cur)
             else:
                 tip = tr("attendance.punch_in_expired").format(deadline=self._punch_deadline_str())
-            QToolTip.showText(
-                self.btn_attendance.mapToGlobal(self.btn_attendance.rect().center()),
-                tip,
-                self.btn_attendance,
-            )
+            QToolTip.showText(anchor.mapToGlobal(anchor.rect().center()), tip, anchor)
             return
         except Exception as e:
             logger.exception("考勤打卡保存失败")
             msg_error(self, tr("msg.error"), tr("attendance.save_failed").format(error=e))
             return
 
-        self._update_attendance_button()
+        self._update_attendance_ui()
         self.attendance_reminder.notify_punched(action)
         self.attendance_auto_punch.reschedule()
 
@@ -192,35 +237,10 @@ class MainWindowAttendanceMixin:
             key = "attendance.punch_out_update" if updated else "attendance.punch_out_done"
 
         QToolTip.showText(
-            self.btn_attendance.mapToGlobal(self.btn_attendance.rect().center()),
+            anchor.mapToGlobal(anchor.rect().center()),
             _tr_fmt(key, "打卡成功", time=hm),
-            self.btn_attendance,
+            anchor,
         )
-
-    def _update_attendance_button(self) -> None:
-        rec = self.attendance_store.get_record(QDate.currentDate().toPyDate())
-        status = self._attendance_status_text(rec)
-        self.btn_attendance.setText(self._attendance_button_text(rec))
-        auto_enabled = config.get_nested("attendance_cfg", "enable_auto_punch", default=False)
-        auto_status = tr(
-            "attendance.sidebar_auto_on" if auto_enabled else "attendance.sidebar_auto_off"
-        )
-        text = "\n".join(
-            (
-                tr("attendance.sidebar_in").format(time=rec.get("in") or tr("attendance.none")),
-                tr("attendance.sidebar_out").format(time=rec.get("out") or tr("attendance.none")),
-                auto_status,
-            )
-        )
-        self.btn_attendance.setToolTip(status)
-        self.attendance_status_label.setText(text)
-        self.attendance_status_label.setToolTip(status)
-
-    @staticmethod
-    def _attendance_button_text(rec: dict) -> str:
-        if rec.get("out"):
-            return tr("btn.attendance")
-        return tr("attendance.punch_out" if rec.get("in") else "attendance.punch_in")
 
     def open_attendance_dialog(self, mode: str = "week") -> None:
         dlg = AttendanceDialog(
@@ -248,10 +268,11 @@ class MainWindowAttendanceMixin:
         if self.tray_mgr.show_message(title, body):
             return
         if self.isVisible():
+            anchor = self.btn_punch_out
             QToolTip.showText(
-                self.btn_attendance.mapToGlobal(self.btn_attendance.rect().topLeft()),
+                anchor.mapToGlobal(anchor.rect().topLeft()),
                 f"{title}\n{body}",
-                self.btn_attendance,
+                anchor,
                 msecShowTime=8000,
             )
             return

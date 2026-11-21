@@ -201,6 +201,8 @@ def build_bundle(
             sidebar_status=qss.sidebar_status_card(r),
             sidebar_title=qss.sidebar_title(r),
             sidebar_subtitle=qss.sidebar_subtitle(r),
+            attendance_punch=qss.attendance_punch_button(r),
+            attendance_stats=qss.attendance_stats_link(r),
             info_label=qss.info_label(r),
             menu=qss.menu(r),
             message_info=qss.message_box(r, "info"),

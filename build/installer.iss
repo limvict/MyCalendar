@@ -6,7 +6,7 @@
 ; checked by scripts/check_version.py, patched by scripts/patch_updater.py.
 
 #define MyAppName "桌面日历"
-#define MyAppVersion "3.1.1"
+#define MyAppVersion "3.1.5"
 #define MyAppPublisher "limvict"
 #define MyAppExeName "DesktopCalendar.exe"
 #define MyAppId "{{8F3C2A10-4B7E-4D91-9F2A-1C5E8B7D3A66}"

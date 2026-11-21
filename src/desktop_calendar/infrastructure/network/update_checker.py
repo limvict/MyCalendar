@@ -22,7 +22,7 @@ UPDATE_MANIFEST_MIRROR_PREFIXES = (
     "https://mirror.ghproxy.com/",
     "https://gh-proxy.com/",
 )
-CURRENT_VERSION = "3.1.1"
+CURRENT_VERSION = "3.1.5"
 CHECK_TIMEOUT = 10
 
 

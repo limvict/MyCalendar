@@ -29,7 +29,7 @@ def test_imported_theme_selection_replaces_live_preview(qapp, fresh_config_manag
         window_state=SimpleNamespace(set_opacity=Mock()),
         attendance_reminder=SimpleNamespace(reschedule=Mock()),
         attendance_auto_punch=SimpleNamespace(reschedule=Mock()),
-        _update_attendance_button=Mock(),
+        _update_attendance_ui=Mock(),
     )
     monkeypatch.setattr(settings_controller, "config", config)
     monkeypatch.setattr(settings_controller, "event_bus", Mock())

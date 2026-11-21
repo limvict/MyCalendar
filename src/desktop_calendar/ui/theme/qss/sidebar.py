@@ -114,3 +114,53 @@ def sidebar_subtitle(r: ThemeResolver) -> str:
         background: transparent;
     }}
     """
+
+
+def attendance_punch_button(r: ThemeResolver) -> str:
+    """「今日状态」下方的上/下班双按钮：等宽、居中、带禁用态。"""
+    return f"""
+    QPushButton {{
+        background-color: {r.color("btn_bg")};
+        color: {_ensure_contrast(r.color("btn_bg"), r.color("btn_text"))};
+        border: 1px solid transparent;
+        border-radius: 9px;
+        padding: 7px 6px;
+        font-size: 12px;
+        font-weight: 500;
+        text-align: center;
+    }}
+    QPushButton:hover {{
+        background-color: {r.color("btn_hover")};
+        border-color: {_hover_accent(r)};
+    }}
+    QPushButton:pressed {{
+        background-color: {r.color("btn_pressed")};
+    }}
+    QPushButton:focus {{
+        border-color: {_hover_accent(r)};
+    }}
+    QPushButton:disabled {{
+        background-color: {r.color("btn_disabled_bg")};
+        color: {r.color("btn_disabled_text")};
+        border-color: {r.color("btn_disabled_border")};
+    }}
+    """
+
+
+def attendance_stats_link(r: ThemeResolver) -> str:
+    """统计行右侧的「统计」文字入口：无边框，hover 用强调色。"""
+    return f"""
+    QPushButton {{
+        background: transparent;
+        border: none;
+        color: {r.color("date_text_color")};
+        font-size: 11px;
+        padding: 2px 6px;
+    }}
+    QPushButton:hover {{
+        color: {_hover_accent(r)};
+    }}
+    QPushButton:pressed {{
+        color: {_hover_accent(r)};
+    }}
+    """

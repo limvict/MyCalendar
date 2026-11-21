@@ -21,7 +21,6 @@ def test_public_api_survives_mixin_split():
         "next_month",
         "on_calendar_select_changed",
         "open_attendance_dialog",
-        "open_attendance_menu",
         "prev_month",
         "quit_app",
         "set_calendar_view",
@@ -117,20 +116,75 @@ def test_quick_add_schedule_formats_date_without_locale(monkeypatch):
     assert captured == ["为 2024年06月10日 添加全天日程："]
 
 
-def test_attendance_button_label_tracks_next_action(monkeypatch):
+def _punch_state(rec, hour, minute=0):
+    from datetime import datetime
+
+    return MainWindow._punch_states(rec, datetime(2024, 6, 10, hour, minute))
+
+
+def test_punch_buttons_split_in_and_out(monkeypatch):
+    """未打卡的早上：上班可用、下班禁用（先上班再下班）。"""
     monkeypatch.setattr("desktop_calendar.ui.main_window.attendance.tr", lambda key: key)
 
-    assert MainWindow._attendance_button_text({}) == "attendance.punch_in"
-    assert MainWindow._attendance_button_text({"in": "09:00"}) == ("attendance.punch_out")
-    assert (
-        MainWindow._attendance_button_text(
-            {
-                "in": "09:00",
-                "out": "18:00",
-            }
+    punch_in, punch_out = _punch_state({}, hour=9)
+    assert punch_in["text"] == "attendance.punch_in"
+    assert punch_in["enabled"] is True
+    assert punch_out["text"] == "attendance.punch_out"
+    assert punch_out["enabled"] is False
+
+
+def test_punch_in_disabled_after_punching(monkeypatch):
+    monkeypatch.setattr("desktop_calendar.ui.main_window.attendance.tr", lambda key: key)
+
+    punch_in, punch_out = _punch_state({"in": "07:35"}, hour=9)
+    assert punch_in["enabled"] is False
+    assert punch_in["text"].startswith("attendance.punch_in_done_btn")
+    assert punch_out["enabled"] is True
+
+
+def test_punch_out_becomes_update_when_already_punched(monkeypatch):
+    monkeypatch.setattr("desktop_calendar.ui.main_window.attendance.tr", lambda key: key)
+
+    _punch_in, punch_out = _punch_state({"in": "07:35", "out": "18:00"}, hour=20)
+    assert punch_out["text"] == "attendance.punch_out_update_short"
+    assert punch_out["enabled"] is True
+
+
+def test_punch_in_disabled_after_deadline(monkeypatch):
+    monkeypatch.setattr("desktop_calendar.ui.main_window.attendance.tr", lambda key: key)
+
+    punch_in, punch_out = _punch_state({}, hour=12)
+    assert punch_in["enabled"] is False
+    assert punch_out["enabled"] is True
+
+
+def _summary_window(days, total_minutes):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        attendance_store=SimpleNamespace(
+            week_summary=lambda _day: SimpleNamespace(days=tuple(days), total_minutes=total_minutes)
         )
-        == "btn.attendance"
     )
+
+
+def test_attendance_summary_text_formats_week(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("desktop_calendar.ui.main_window.attendance.tr", lambda key: key)
+
+    day = lambda in_t, out_t: SimpleNamespace(in_time=in_t, out_time=out_t)  # noqa: E731
+    # 3 天完整记录、24.5h = 1470 分钟
+    done = _summary_window([day("08:00", "18:00")] * 3, 1470)
+    assert MainWindow._attendance_summary_text(done) == "attendance.sidebar_week_summary"
+
+    # 只打了上班卡：算 1 天，但工时 0 不显示小时
+    partial = _summary_window([day("08:00", None)], 0)
+    assert MainWindow._attendance_summary_text(partial) == "attendance.sidebar_week_days"
+
+    # 完全没打卡
+    empty = _summary_window([], 0)
+    assert MainWindow._attendance_summary_text(empty) == "attendance.sidebar_week_empty"
 
 
 def test_main_window_geometry_follows_bundle_and_stays_fixed(qapp):
