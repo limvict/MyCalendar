@@ -1,0 +1,134 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  # 手动触发只构建 + 校验，不发布；产物留作 artifact。
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Dry-run version (e.g. 3.0.3). No release will be published."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# 同一个 ref 串行发布，避免 tag 与 dry-run 互相覆盖 release/ 产物
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # release_notes 来自 git log，浅克隆会让说明只剩一行
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,build]"
+
+      # 版本只认 X.Y.Z：与 validate_ver / _SAFE_VERSION_RE / _is_newer 契约一致
+      - name: Resolve, patch and verify version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.version }}"
+          else
+            TAG="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be X.Y.Z (got: $TAG)"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          export VER="$TAG"
+          python scripts/patch_updater.py --version-info
+          python scripts/check_version.py
+
+      - name: Checks
+        shell: bash
+        env:
+          PYTHONPATH: src
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ruff format --check .
+          ruff check .
+          lint-imports
+          python scripts/check_i18n.py
+          python -m pytest -q
+
+      - name: Build exe and installer
+        shell: pwsh
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          python -m PyInstaller --noconfirm --clean --distpath release build/app.spec
+          $exe = "release/DesktopCalendar.exe"
+          if (-not (Test-Path $exe)) { Write-Error "missing $exe"; exit 1 }
+          if ((Get-Item $exe).Length -lt 1000000) { Write-Error "exe too small"; exit 1 }
+          # 版本资源由 patch_updater --version-info 生成，必须与目标版本一致
+          if (-not (Get-Item $exe).VersionInfo.FileVersion.StartsWith($env:VER)) {
+            Write-Error "exe FileVersion does not match $env:VER"
+            exit 1
+          }
+
+          choco install innosetup --version=6.3.3 -y --no-progress --limit-output
+          $iscc = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe",
+            (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $iscc) { Write-Error "ISCC.exe not found"; exit 1 }
+          & $iscc build\installer.iss
+          $setup = "release/DesktopCalendar_Setup_$env:VER.exe"
+          if (-not (Test-Path $setup)) { Write-Error "missing $setup"; exit 1 }
+          Write-Host "OK: $setup ($((Get-Item $setup).Length) bytes)"
+
+      - name: Manifest and verify
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DOWNLOAD_MIRROR_BASE_URLS: "https://ghproxy.net/https://github.com/${{ github.repository }}/releases/download/v{ver},https://mirror.ghproxy.com/https://github.com/${{ github.repository }}/releases/download/v{ver},https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download/v{ver}"
+        run: |
+          python scripts/patch_updater.py --manifest
+          python scripts/check_version.py --manifest-required --verify-sha256
+
+      - name: Upload dry-run artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-${{ steps.ver.outputs.version }}
+          path: |
+            release/DesktopCalendar_Setup_*.exe
+            release/version.json
+          if-no-files-found: error
+
+      # 只在 push tag 时发布；只传安装包与 manifest（裸 exe 不上传）
+      - uses: softprops/action-gh-release@v2
+        if: github.event_name == 'push'
+        with:
+          name: v${{ steps.ver.outputs.version }}
+          fail_on_unmatched_files: true
+          files: |
+            release/DesktopCalendar_Setup_*.exe
+            release/version.json
+          generate_release_notes: true
